@@ -9,7 +9,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "server": "node server/index.js",
     "start": "node server/index.js",
-    "test": "node --test server/index.test.js",
+    "test": "node --test server/index.test.js src/navigation.test.js src/attractions.test.js",
     "dev:all": "node scripts/dev.mjs"
   },
   "dependencies": {

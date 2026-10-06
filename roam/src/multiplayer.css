@@ -1,1 +1,23 @@
-.top-right-tools{display:flex;align-items:center;gap:8px}.wave-button{width:33px;height:33px;background:#f7f8ed}.peer-label{position:absolute;transform:translate(-50%,-100%);padding:5px 9px;background:#fdfcf0e8;border:2px solid;border-radius:20px;font-size:10px;font-weight:500;color:#566447;white-space:nowrap;box-shadow:0 2px 7px #44553013}
+.top-right-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wave-button {
+  width: 33px;
+  height: 33px;
+  background: #f7f8ed;
+}
+.peer-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  padding: 5px 9px;
+  background: #fdfcf0e8;
+  border: 2px solid;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #566447;
+  white-space: nowrap;
+  box-shadow: 0 2px 7px #44553013;
+}

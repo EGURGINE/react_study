@@ -1,38 +1,345 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
-export function useMultiplayer(position, notify) {
-  const [player,setPlayer]=useState(null),[peers,setPeers]=useState([]),[messages,setMessages]=useState([]),[connected,setConnected]=useState(false),[joining,setJoining]=useState(false),[error,setError]=useState(''),[honk,setHonk]=useState(null),[correction,setCorrection]=useState(null),[traveling,setTraveling]=useState(false);
-  const socket=useRef(null),identity=useRef(null),pending=useRef(null),mounted=useRef(true),joinTimer=useRef(null),pendingSend=useRef(null),sendTimer=useRef(null),travelPending=useRef(false);
-  const join=useCallback(nickname=>new Promise(resolve=>{
-    pending.current?.(false);clearTimeout(joinTimer.current);
-    if(socket.current)socket.current.close();
-    identity.current=null;setPlayer(null);setConnected(false);setPeers([]);
-    const base=import.meta.env.VITE_MULTIPLAYER_URL;
-    const url=base||(import.meta.env.DEV?`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/socket`:null);
-    if(!url){setError('The shared island is not connected yet. You can still explore on your own.');resolve(false);return;}
-    setJoining(true);setError('');pending.current=resolve;
-    let ws;try{ws=new WebSocket(url);}catch{setJoining(false);setError('The multiplayer address is unavailable.');resolve(false);return;}socket.current=ws;
-    const finish=ok=>{clearTimeout(joinTimer.current);setJoining(false);pending.current?.(ok);pending.current=null;};
-    joinTimer.current=setTimeout(()=>{setError('The island is taking a little longer to wake up. Please try again.');finish(false);ws.close();},18000);
-    ws.onopen=()=>ws.send(JSON.stringify({type:'join',nickname:nickname.trim()}));
-    ws.onmessage=event=>{
-      if(!mounted.current||socket.current!==ws)return;
-      let data;try{data=JSON.parse(event.data);}catch{return;}
-      if(data.type==='welcome'){identity.current=data.player;position.current={...position.current,x:data.player.x,z:data.player.z,heading:data.player.heading};setPlayer(data.player);setPeers((data.players||[]).filter(p=>p.id!==data.player.id));setMessages(data.messages||[]);setConnected(true);setError('');finish(true);notify(`Welcome, ${data.player.nickname}. Make yourself at home.`);}
-      if(data.type==='state')setPeers(data.players.filter(p=>p.id!==identity.current?.id));
-      if(data.type==='chat'){setMessages(ms=>[...ms,data.message].slice(-100));if(data.message.playerId===identity.current?.id){clearTimeout(sendTimer.current);pendingSend.current?.(true);pendingSend.current=null;}}
-      if(data.type==='honk')setHonk({id:data.id,at:Date.now()});
-      if(data.type==='teleport'){position.current={...position.current,x:data.player.x,z:data.player.z,heading:data.player.heading};travelPending.current=false;setTraveling(false);setCorrection({...data.player,at:Date.now()});}
-      if(data.type==='error'){if(!identity.current){setError(data.message);finish(false);}else{if(travelPending.current){travelPending.current=false;setTraveling(false);}else{clearTimeout(sendTimer.current);pendingSend.current?.(false);pendingSend.current=null;}notify(data.message);}}
+export function useMultiplayer(position, notify, onInteraction) {
+  const [player, setPlayer] = useState(null),
+    [peers, setPeers] = useState([]),
+    [messages, setMessages] = useState([]),
+    [connected, setConnected] = useState(false),
+    [joining, setJoining] = useState(false),
+    [error, setError] = useState(""),
+    [honk, setHonk] = useState(null),
+    [correction, setCorrection] = useState(null),
+    [traveling, setTraveling] = useState(false),
+    [photos, setPhotos] = useState({}),
+    [uploading, setUploading] = useState(false);
+  const socket = useRef(null),
+    identity = useRef(null),
+    pending = useRef(null),
+    mounted = useRef(true),
+    joinTimer = useRef(null),
+    pendingSend = useRef(null),
+    sendTimer = useRef(null),
+    travelPending = useRef(false),
+    pendingPhoto = useRef(null),
+    photoTimer = useRef(null);
+  const join = useCallback(
+    (nickname) =>
+      new Promise((resolve) => {
+        pending.current?.(false);
+        clearTimeout(joinTimer.current);
+        if (socket.current) socket.current.close();
+        identity.current = null;
+        setPlayer(null);
+        setConnected(false);
+        setPeers([]);
+        const base = import.meta.env.VITE_MULTIPLAYER_URL;
+        const url =
+          base ||
+          (import.meta.env.DEV
+            ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/socket`
+            : null);
+        if (!url) {
+          setError(
+            "The shared island is not connected yet. You can still explore on your own.",
+          );
+          resolve(false);
+          return;
+        }
+        setJoining(true);
+        setError("");
+        pending.current = resolve;
+        let ws;
+        try {
+          ws = new WebSocket(url);
+        } catch {
+          setJoining(false);
+          setError("The multiplayer address is unavailable.");
+          resolve(false);
+          return;
+        }
+        socket.current = ws;
+        const finish = (ok) => {
+          clearTimeout(joinTimer.current);
+          setJoining(false);
+          pending.current?.(ok);
+          pending.current = null;
+        };
+        joinTimer.current = setTimeout(() => {
+          setError(
+            "The island is taking a little longer to wake up. Please try again.",
+          );
+          finish(false);
+          ws.close();
+        }, 18000);
+        ws.onopen = () =>
+          ws.send(JSON.stringify({ type: "join", nickname: nickname.trim() }));
+        ws.onmessage = (event) => {
+          if (!mounted.current || socket.current !== ws) return;
+          let data;
+          try {
+            data = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          if (data.type === "welcome") {
+            identity.current = data.player;
+            position.current = {
+              ...position.current,
+              x: data.player.x,
+              z: data.player.z,
+              heading: data.player.heading,
+            };
+            setPlayer(data.player);
+            setPeers(
+              (data.players || []).filter((p) => p.id !== data.player.id),
+            );
+            setMessages(data.messages || []);
+            setPhotos(
+              Object.fromEntries(
+                (data.photos || []).map((p) => [p.playerId, p]),
+              ),
+            );
+            setConnected(true);
+            setError("");
+            finish(true);
+            notify(`${data.player.nickname}님, 반가워요. 편하게 놀다 가세요!`);
+          }
+          if (data.type === "state")
+            setPeers(data.players.filter((p) => p.id !== identity.current?.id));
+          if (data.type === "chat") {
+            setMessages((ms) => [...ms, data.message].slice(-100));
+            if (data.message.playerId === identity.current?.id) {
+              clearTimeout(sendTimer.current);
+              pendingSend.current?.(true);
+              pendingSend.current = null;
+            }
+          }
+          if (data.type === "honk") setHonk({ id: data.id, at: Date.now() });
+          if (
+            data.type === "interaction" &&
+            data.playerId !== identity.current?.id
+          )
+            onInteraction?.(data);
+          if (data.type === "photo") {
+            setPhotos((previous) => {
+              const next = { ...previous };
+              if (data.photo.src) next[data.photo.playerId] = data.photo;
+              else delete next[data.photo.playerId];
+              return next;
+            });
+            if (data.photo.playerId === identity.current?.id) {
+              clearTimeout(photoTimer.current);
+              pendingPhoto.current?.(true);
+              pendingPhoto.current = null;
+              setUploading(false);
+            }
+          }
+          if (data.type === "teleport") {
+            position.current = {
+              ...position.current,
+              x: data.player.x,
+              z: data.player.z,
+              heading: data.player.heading,
+            };
+            travelPending.current = false;
+            setTraveling(false);
+            setCorrection({ ...data.player, at: Date.now() });
+          }
+          if (data.type === "error") {
+            const operation = data.operation;
+            if (!identity.current) {
+              setError(data.message);
+              finish(false);
+            } else {
+              if (operation === "photo") {
+                clearTimeout(photoTimer.current);
+                pendingPhoto.current?.(false);
+                pendingPhoto.current = null;
+                setUploading(false);
+              }
+              if (operation === "teleport") {
+                travelPending.current = false;
+                setTraveling(false);
+              }
+              if (operation === "chat") {
+                clearTimeout(sendTimer.current);
+                pendingSend.current?.(false);
+                pendingSend.current = null;
+              }
+              if (operation === "move" && data.player) {
+                position.current = { ...position.current, ...data.player };
+                setCorrection({ ...data.player, at: Date.now() });
+              }
+              notify(data.message);
+            }
+          }
+        };
+        ws.onerror = () => {
+          if (socket.current === ws) {
+            setError(
+              "The shared island is unavailable right now. Try again in a moment.",
+            );
+            finish(false);
+          }
+        };
+        ws.onclose = () => {
+          if (socket.current !== ws || !mounted.current) return;
+          finish(false);
+          clearTimeout(sendTimer.current);
+          pendingSend.current?.(false);
+          pendingSend.current = null;
+          clearTimeout(photoTimer.current);
+          pendingPhoto.current?.(false);
+          pendingPhoto.current = null;
+          setUploading(false);
+          setPhotos({});
+          travelPending.current = false;
+          setTraveling(false);
+          const wasJoined = Boolean(identity.current);
+          identity.current = null;
+          setPlayer(null);
+          setPeers([]);
+          setConnected(false);
+          if (wasJoined) notify("연결이 종료됐어요. 언제든 다시 들어오세요.");
+        };
+      }),
+    [notify, onInteraction],
+  );
+  const send = useCallback(
+    (text) =>
+      new Promise((resolve) => {
+        if (
+          socket.current?.readyState !== WebSocket.OPEN ||
+          !identity.current ||
+          pendingSend.current
+        ) {
+          resolve(false);
+          return;
+        }
+        pendingSend.current = resolve;
+        sendTimer.current = setTimeout(() => {
+          pendingSend.current?.(false);
+          pendingSend.current = null;
+          notify("Your message was not confirmed. Please try again.");
+        }, 5000);
+        socket.current.send(JSON.stringify({ type: "chat", text }));
+      }),
+    [notify],
+  );
+  const honkNow = useCallback(() => {
+    if (socket.current?.readyState === WebSocket.OPEN && identity.current)
+      socket.current.send(JSON.stringify({ type: "honk" }));
+  }, []);
+  const emitInteraction = useCallback((event) => {
+    if (socket.current?.readyState === WebSocket.OPEN && identity.current)
+      socket.current.send(
+        JSON.stringify({ type: "interaction", objectId: event.objectId }),
+      );
+  }, []);
+  const leave = useCallback(() => {
+    socket.current?.close();
+    identity.current = null;
+    setPlayer(null);
+    setPeers([]);
+    setConnected(false);
+  }, []);
+  const teleport = useCallback((destination) => {
+    if (socket.current?.readyState === WebSocket.OPEN && identity.current) {
+      if (travelPending.current) return true;
+      travelPending.current = true;
+      setTraveling(true);
+      socket.current.send(JSON.stringify({ type: "teleport", destination }));
+      return true;
+    }
+    return false;
+  }, []);
+  const cancelJoin = useCallback(() => {
+    if (identity.current || !pending.current) return;
+    const ws = socket.current;
+    socket.current = null;
+    clearTimeout(joinTimer.current);
+    pending.current?.(false);
+    pending.current = null;
+    setJoining(false);
+    ws?.close();
+  }, []);
+  const sharePhoto = useCallback(
+    (src) =>
+      new Promise((resolve) => {
+        if (
+          socket.current?.readyState !== WebSocket.OPEN ||
+          !identity.current ||
+          pendingPhoto.current
+        ) {
+          resolve(false);
+          return;
+        }
+        setUploading(true);
+        pendingPhoto.current = resolve;
+        photoTimer.current = setTimeout(() => {
+          pendingPhoto.current?.(false);
+          pendingPhoto.current = null;
+          setUploading(false);
+          notify("사진을 공유하지 못했어요. 다시 시도해 주세요.");
+        }, 15000);
+        socket.current.send(JSON.stringify({ type: "photo", src }));
+      }),
+    [notify],
+  );
+  useEffect(() => {
+    mounted.current = true;
+    const interval = setInterval(() => {
+      const ws = socket.current;
+      if (
+        ws?.readyState === WebSocket.OPEN &&
+        identity.current &&
+        !travelPending.current &&
+        !pendingPhoto.current &&
+        ws.bufferedAmount < 16384
+      ) {
+        const p = position.current;
+        ws.send(
+          JSON.stringify({
+            type: "move",
+            x: p.x,
+            y: p.y || 0,
+            z: p.z,
+            heading: p.heading,
+          }),
+        );
+      }
+    }, 80);
+    return () => {
+      mounted.current = false;
+      clearInterval(interval);
+      clearTimeout(joinTimer.current);
+      clearTimeout(sendTimer.current);
+      clearTimeout(photoTimer.current);
+      socket.current?.close();
+      pending.current?.(false);
+      pendingSend.current?.(false);
+      pendingPhoto.current?.(false);
     };
-    ws.onerror=()=>{if(socket.current===ws){setError('The shared island is unavailable right now. Try again in a moment.');finish(false);}};
-    ws.onclose=()=>{if(socket.current!==ws||!mounted.current)return;finish(false);clearTimeout(sendTimer.current);pendingSend.current?.(false);pendingSend.current=null;travelPending.current=false;setTraveling(false);const wasJoined=Boolean(identity.current);identity.current=null;setPlayer(null);setPeers([]);setConnected(false);if(wasJoined)notify('You’ve left the shared island. Join again whenever you like.');};
-  }),[notify]);
-  const send=useCallback(text=>new Promise(resolve=>{if(socket.current?.readyState!==WebSocket.OPEN||!identity.current||pendingSend.current){resolve(false);return;}pendingSend.current=resolve;sendTimer.current=setTimeout(()=>{pendingSend.current?.(false);pendingSend.current=null;notify('Your message was not confirmed. Please try again.');},5000);socket.current.send(JSON.stringify({type:'chat',text}));}),[notify]);
-  const honkNow=useCallback(()=>{if(socket.current?.readyState===WebSocket.OPEN&&identity.current)socket.current.send(JSON.stringify({type:'honk'}));},[]);
-  const leave=useCallback(()=>{socket.current?.close();identity.current=null;setPlayer(null);setPeers([]);setConnected(false);},[]);
-  const teleport=useCallback(destination=>{if(socket.current?.readyState===WebSocket.OPEN&&identity.current){if(travelPending.current)return true;travelPending.current=true;setTraveling(true);socket.current.send(JSON.stringify({type:'teleport',destination}));return true;}return false;},[]);
-  const cancelJoin=useCallback(()=>{if(identity.current||!pending.current)return;const ws=socket.current;socket.current=null;clearTimeout(joinTimer.current);pending.current?.(false);pending.current=null;setJoining(false);ws?.close();},[]);
-  useEffect(()=>{mounted.current=true;const interval=setInterval(()=>{const ws=socket.current;if(ws?.readyState===WebSocket.OPEN&&identity.current&&!travelPending.current){const p=position.current;ws.send(JSON.stringify({type:'move',x:p.x,z:p.z,heading:p.heading}));}},80);return()=>{mounted.current=false;clearInterval(interval);clearTimeout(joinTimer.current);clearTimeout(sendTimer.current);socket.current?.close();pending.current?.(false);pendingSend.current?.(false);};},[position]);
-  return {player,peers,messages,connected,joining,error,join,send,leave,honk,honkNow,teleport,correction,traveling,cancelJoin};
+  }, [position]);
+  return {
+    player,
+    peers,
+    messages,
+    connected,
+    joining,
+    error,
+    join,
+    send,
+    leave,
+    honk,
+    honkNow,
+    teleport,
+    correction,
+    traveling,
+    cancelJoin,
+    photos,
+    sharePhoto,
+    uploading,
+    emitInteraction,
+  };
 }

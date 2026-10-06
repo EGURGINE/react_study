@@ -1,6 +1,6 @@
-# roam. — Drive a little, discover a lot.
+# roam. — 우리들의 작은 아지트
 
-Bruno Simon의 탐색형 포트폴리오에서 영감을 받은 **React + Vite + Three.js** 프로젝트입니다. 모든 지형·나무·건물·자동차는 직접 만든 3D 지오메트리이며, 원본 사이트 에셋을 사용하지 않습니다.
+자동차를 타고 만나고, 채팅과 사진을 나누는 **React + Vite + Three.js** 친목 공간입니다. Bruno Simon 사이트의 탐색 방식에서 영감을 받았으며, 지형·나무·건물·자동차는 직접 만든 3D 지오메트리입니다.
 
 ## 실행
 
@@ -21,8 +21,12 @@ npm run build  # 정적 배포 파일 → roam/dist
 
 ## 구현 기능
 
-- WASD·방향키 자동차 운전, Shift 부스트, Space 브레이크, R 초기화
-- 프로젝트 갤러리, 소개, 트램펄린이 있는 플레이그라운드
+- **마우스 우클릭** 목적지 이동: 장애물 회피 경로 탐색, 도착 시 정지, 키보드로 즉시 취소
+- WASD·방향키 자동차 운전, Shift 부스트, Space 브레이크, R 초기화, 마우스 휠 확대·축소
+- 넓어진 섬, 캠프파이어·텐트·방석·전구 장식이 있는 캠핑 아지트
+- 충돌하면 터졌다가 8초 후 돌아오는 상자 3개, 부스트 발판 2개, 범퍼 2개, 점프패드 2개
+- 다른 사람의 점프 높이와 상자·발판 효과 동기화
+- 사진 공유: 내 차 위에 사진 카드 표시, 다른 사람의 사진 클릭 확대, 변경·내리기
 - E/Enter 근처 구역 탐색, 미니맵 빠른 이동
 - 모바일 터치 조작, 효과음 켜기/끄기, 그래픽 미지원 시 일반 메뉴 탐색
 - 닉네임 입장, **서버에서 최대 10명 제한**, 중복 닉네임 방지
@@ -30,7 +34,7 @@ npm run build  # 정적 배포 파일 → roam/dist
 - 실시간 채팅, 인사 보내기, 접속 인원, 퇴장·끊긴 접속 정리
 - 채팅 길이·빈도 제한, 메시지 크기 제한, Origin 검증
 
-이름·프로젝트 글은 교체 가능한 샘플입니다. `roam/src/App.jsx`에서 콘텐츠를, `roam/src/world.js`에서 섬의 구조를 변경할 수 있습니다.
+`roam/src/App.jsx`에서 화면을, `world.js`에서 섬과 자동차를, `attractions.js`에서 놀이 요소를 변경할 수 있습니다.
 
 ## GitHub Pages 배포
 
@@ -47,7 +51,7 @@ GitHub Pages에서는 WebSocket 서버를 실행할 수 없습니다. `server/in
 1. Render에서 **New → Blueprint**를 선택하고 이 GitHub 저장소를 연결합니다.
 2. `roam-multiplayer` 서비스를 생성합니다. 무료 플랜으로 구성되어 있습니다.
 3. 발급된 서비스 URL이 `https://이름.onrender.com`이면, GitHub 저장소 **Settings → Secrets and variables → Actions → Variables**에 `VITE_MULTIPLAYER_URL=wss://이름.onrender.com/ws`를 추가합니다.
-4. **Deploy portfolio to GitHub Pages** 워크플로를 다시 실행합니다.
+4. **Deploy roam to GitHub Pages** 워크플로를 다시 실행합니다.
 
 다른 호스팅에서도 `cd roam && npm ci --omit=dev && npm start`로 실행할 수 있습니다. `PORT`는 호스팅 업체가 지정한 값을 사용합니다. `ALLOWED_ORIGINS`는 허용할 프런트엔드 origin을 쉼표로 구분합니다. 기본값은 `https://egurgine.github.io`와 localhost입니다.
 
@@ -55,6 +59,8 @@ GitHub Pages에서는 WebSocket 서버를 실행할 수 없습니다. `server/in
 
 - 단일 섬 / 단일 서버 인스턴스입니다. 여러 인스턴스로 확장하려면 공유 상태 저장소가 필요합니다.
 - 접속 상태와 최근 50개 채팅은 서버 메모리에만 보관되며 서버 재시작 시 초기화됩니다.
+- 사진은 한 사람당 한 장이며, 접속 중에만 공유되고 퇴장 시 제거됩니다. 영구 앨범은 아닙니다.
+- 사진은 JPG/PNG/WebP 최대 12MB를 입력받아 브라우저에서 최대 1024px JPEG로 다시 인코딩합니다. 원본 EXIF 메타데이터는 전송하지 않습니다. 서버는 이미지 서명과 최대 512KiB 크기를 확인합니다.
 - 무료 호스팅의 절전 상태에서는 첫 접속이 지연될 수 있습니다. 접속 오류가 표시되면 잠시 뒤 재시도하세요.
 - 서버 URL이 없는 정적 빌드에서는 싱글 플레이와 콘텐츠 탐색이 동작하고, 멀티플레이 입장 시 연결 안내가 표시됩니다.
 - 모바일 조작과 배경 탭의 느린 실행을 고려해 서버는 연결 상태를 heartbeat로 확인합니다. 연결이 끊기면 다시 닉네임으로 입장할 수 있습니다.
@@ -65,6 +71,9 @@ GitHub Pages에서는 WebSocket 서버를 실행할 수 없습니다. `server/in
 roam/
   src/App.jsx           화면, 패널, 닉네임, 채팅
   src/world.js          Three.js 월드, 자동차, 입력, 원격 차량
+  src/navigation.js     우클릭 이동 경로 탐색
+  src/attractions.js    폭발 상자, 부스트, 범퍼, 점프패드, 캠프장
+  src/photos.js         공유 사진 크기 조절·재인코딩
   src/multiplayer.js    WebSocket 클라이언트
   src/styles.css        반응형 디자인
   server/index.js       독립 실행 가능한 WebSocket 서버

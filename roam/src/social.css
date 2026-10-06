@@ -1,0 +1,584 @@
+.social-app {
+  font-family: "DM Sans", "Malgun Gothic", sans-serif;
+}
+.social-app .intro h1 {
+  font-family: "Manrope", "Malgun Gothic", sans-serif;
+  font-size: clamp(35px, 3.4vw, 52px);
+  line-height: 1.4;
+  letter-spacing: -2px;
+  font-weight: 550;
+  margin-top: 17px;
+}
+.social-app .intro h1 em {
+  font-family: inherit;
+  font-style: normal;
+  font-weight: 500;
+  color: #5e7450;
+}
+.social-app .intro {
+  top: 19%;
+}
+.social-app .intro > p {
+  font-size: 13px;
+  line-height: 1.85;
+}
+.social-app .intro-note {
+  font-size: 11px;
+  margin-top: 20px;
+  gap: 8px;
+}
+.social-app .header nav {
+  gap: 28px;
+}
+.social-app .header nav button {
+  font-size: 12px;
+}
+.social-app .modal h2 {
+  font-family: "Manrope", "Malgun Gothic", sans-serif;
+  font-weight: 500;
+  line-height: 1.4;
+  font-size: 35px;
+  letter-spacing: -1.5px;
+}
+.social-app .modal-intro {
+  line-height: 1.95;
+}
+.social-app .wordmark i {
+  font-size: 8px;
+}
+.hangout-chat {
+  left: 46px;
+  right: auto;
+  bottom: 82px;
+  width: 322px;
+}
+.hangout-chat .chat-messages {
+  height: 174px;
+}
+.hangout-chat .chat-header strong {
+  font-size: 14px;
+}
+.chat-spark {
+  color: #849d61 !important;
+  font-size: 18px !important;
+  margin-left: 6px;
+}
+.hangout-chat .chat-header > div > span {
+  font-size: 11px;
+}
+.chat-people {
+  font-size: 10px;
+}
+.chat-welcome {
+  text-align: center;
+  color: #8c9b79;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 10px;
+}
+.chat-welcome p {
+  font-size: 12px;
+  margin: 0;
+}
+.chat-welcome > button {
+  font-size: 11px;
+  padding: 9px 16px;
+  background: #e2eacd;
+  border-radius: 30px;
+  color: #617949;
+}
+.hangout-chat .chat-form {
+  padding: 11px 13px;
+}
+.chat-form .chat-photo-button {
+  background: none;
+  color: #809668;
+  flex-shrink: 0;
+}
+.chat-message p {
+  font-size: 13px;
+}
+.social-controls {
+  position: absolute;
+  bottom: 82px;
+  left: 53%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  background: #f9faf0d9;
+  border: 1px solid #e6ebd8;
+  border-radius: 30px;
+  font-size: 10px;
+  color: #8a987c;
+  white-space: nowrap;
+  backdrop-filter: blur(12px);
+}
+.social-controls > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.social-controls kbd {
+  font-size: 9px;
+  height: 20px;
+  letter-spacing: 1px;
+}
+.social-controls button {
+  padding: 0;
+  color: #8a987c;
+}
+.social-app .interaction-prompt {
+  bottom: 142px;
+  left: 53%;
+}
+.upload-fab {
+  position: absolute;
+  right: 48px;
+  bottom: 342px;
+  width: 42px;
+  height: 42px;
+  background: #e0eacd;
+  border: 1px solid #d3dfbe;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #6f8854;
+  z-index: 5;
+}
+.self-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: #6a8350;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.self-label > span {
+  font-size: 18px;
+}
+.world-anchor {
+  left: 0;
+  top: 0;
+  will-change: translate;
+}
+.car-photo {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 15px)) rotate(-3deg);
+  width: 104px;
+  padding: 5px 5px 6px;
+  background: #fffcf4;
+  border: 1px solid #fffdf6;
+  box-shadow: 0 5px 15px #3f502329;
+  border-radius: 5px;
+  pointer-events: auto;
+  transition:
+    width 0.18s,
+    transform 0.18s;
+  z-index: 6;
+}
+.car-photo:hover {
+  transform: translate(-50%, calc(-100% - 18px)) rotate(0);
+  width: 128px;
+  z-index: 8;
+}
+.car-photo img {
+  width: 100%;
+  height: 70px;
+  object-fit: cover;
+  border-radius: 2px;
+  display: block;
+}
+.car-photo > span {
+  font-size: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 2px 0;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #80916c;
+}
+.car-photo > i {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  height: 24px;
+  width: 1px;
+  background: linear-gradient(#8c9e6b, transparent);
+}
+.own-photo {
+  transform: translate(-50%, calc(-100% - 15px)) rotate(3deg);
+}
+.photo-empty {
+  height: 200px;
+  background: #e9eddd;
+  border: 1px dashed #c6d2af;
+  border-radius: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #99aa7e;
+}
+.photo-empty span {
+  font-size: 13px;
+}
+.photo-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 20px;
+}
+.photo-note {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #9ba58c;
+  margin-top: 18px;
+}
+.remove-photo {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: #8e9a7e;
+}
+.my-photo-preview {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 0;
+}
+.my-photo-preview img {
+  display: block;
+  width: 100%;
+  height: 280px;
+  object-fit: cover;
+}
+.hangout-tips {
+  margin: 25px 0 30px;
+}
+.hangout-tips > p {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 0;
+  color: #82976b;
+}
+.hangout-tips span {
+  font-size: 13px;
+  color: #8a967c;
+  line-height: 1.9;
+}
+.hangout-tips strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #5b7650;
+}
+.help-photo {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: #e7eddb;
+  margin-bottom: 18px;
+  color: #809369;
+}
+.help-photo p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.help-photo strong {
+  font-weight: 500;
+  color: #567046;
+}
+.photo-modal {
+  width: min(900px, calc(100vw - 35px));
+  padding: 25px;
+  max-height: 90svh;
+}
+.photo-modal .modal-eyebrow {
+  margin: 7px 45px 20px 4px;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.full-photo {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  max-height: 65svh;
+  object-fit: contain;
+  background: #ebeee3;
+  border-radius: 8px;
+}
+.photo-lightbox-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #98a287;
+  margin: 16px 2px 0;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-height: 780px) and (min-width: 761px) {
+  .social-app .intro {
+    top: 18%;
+  }
+  .social-app .intro h1 {
+    font-size: 37px;
+    line-height: 1.3;
+  }
+  .social-app .intro-note {
+    display: none;
+  }
+  .hangout-chat .chat-messages {
+    height: 128px;
+  }
+  .hangout-chat {
+    bottom: 69px;
+  }
+  .hangout-chat .chat-header {
+    padding-top: 12px;
+  }
+  .social-app .intro > p {
+    font-size: 12px;
+    margin: 8px 0;
+  }
+  .social-controls {
+    bottom: 75px;
+  }
+}
+@media (min-width: 1600px) {
+  .hangout-chat {
+    left: 64px;
+    bottom: 90px;
+    width: 345px;
+  }
+  .upload-fab {
+    right: 65px;
+    bottom: 355px;
+  }
+}
+@media (max-width: 1100px) {
+  .hangout-chat {
+    left: 28px;
+    width: 290px;
+  }
+  .social-controls {
+    gap: 9px;
+    padding: 10px 12px;
+    left: 56%;
+    font-size: 9px;
+  }
+  .social-controls > span:nth-child(2) {
+    display: none;
+  }
+  .upload-fab {
+    right: 29px;
+    bottom: 316px;
+  }
+  .social-app .intro {
+    top: 19%;
+  }
+  .social-app .intro h1 {
+    font-size: 39px;
+  }
+  .social-app .header nav {
+    gap: 22px;
+  }
+}
+@media (max-width: 760px) {
+  .social-app .header nav {
+    gap: 17px;
+  }
+  .social-app .header nav button {
+    font-size: 10px;
+  }
+  .social-app .header nav button:first-child {
+    display: none;
+  }
+  .social-app .intro {
+    top: 145px;
+  }
+  .social-app .intro .eyebrow {
+    font-size: 6.5px;
+  }
+  .social-app .intro h1 {
+    font-size: 32px;
+    line-height: 1.35;
+    margin: 13px 0 11px;
+    letter-spacing: -1.7px;
+  }
+  .social-app .intro > p {
+    font-size: 11px;
+    line-height: 1.8;
+    display: block;
+    margin: 0;
+  }
+  .social-app .intro-note {
+    display: none;
+  }
+  .social-app .compass {
+    top: 26%;
+  }
+  .hangout-chat {
+    left: auto;
+    right: 20px;
+    bottom: 283px;
+    width: min(320px, calc(100vw - 40px));
+  }
+  .hangout-chat .chat-messages {
+    height: 175px;
+  }
+  .hangout-chat .chat-header {
+    padding-top: 14px;
+  }
+  .chat-welcome > button {
+    font-size: 12px;
+  }
+  .social-controls {
+    display: none;
+  }
+  .upload-fab {
+    right: 22px;
+    bottom: 285px;
+    width: 34px;
+    height: 34px;
+  }
+  .upload-fab svg {
+    width: 17px;
+  }
+  .social-app .interaction-prompt {
+    left: 23px;
+    bottom: 149px;
+  }
+  .car-photo {
+    width: 78px;
+    padding: 4px;
+  }
+  .car-photo img {
+    height: 49px;
+  }
+  .car-photo > span {
+    font-size: 7px;
+    padding: 4px 1px 1px;
+  }
+  .car-photo:hover {
+    width: 89px;
+  }
+  .car-photo > i {
+    height: 17px;
+  }
+  .social-app .modal h2 {
+    font-size: 29px;
+  }
+  .social-app .world-canvas,
+  .social-app .world-labels {
+    top: 24%;
+    bottom: -2%;
+  }
+  .social-app .self-label {
+    font-size: 8px;
+  }
+  .social-app .world-label {
+    font-size: 9px;
+  }
+  .social-app .modal-intro {
+    font-size: 13px;
+  }
+  .photo-actions {
+    gap: 12px;
+  }
+  .photo-actions .primary-button {
+    font-size: 12px;
+    padding: 13px 17px;
+  }
+  .photo-note {
+    font-size: 10px;
+  }
+  .photo-modal {
+    padding: 18px;
+  }
+  .photo-empty {
+    height: 160px;
+  }
+  .photo-lightbox-footer {
+    font-size: 10px;
+  }
+  .social-app .help-rows p {
+    font-size: 11px;
+  }
+  .social-app .help-rows kbd {
+    font-size: 8px;
+  }
+  .social-app .wordmark {
+    font-size: 31px;
+  }
+}
+.fun-spots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 22px;
+}
+.fun-spots button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  border: 1px solid #dfe5d3;
+  background: #edf1e3;
+  border-radius: 9px;
+  padding: 14px;
+}
+.fun-spots strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #68814f;
+  margin-bottom: 5px;
+}
+.fun-spots small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #95a280;
+}
+.fun-spots svg {
+  color: #9aaf7d;
+}
+@media (max-width: 500px) {
+  .fun-spots {
+    grid-template-columns: 1fr;
+  }
+  .fun-spots button {
+    padding: 13px 16px;
+  }
+}
