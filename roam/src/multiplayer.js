@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useMultiplayer(position, notify, onInteraction) {
+  const configured = Boolean(
+    import.meta.env.VITE_MULTIPLAYER_URL?.trim() || import.meta.env.DEV,
+  );
   const [player, setPlayer] = useState(null),
     [peers, setPeers] = useState([]),
     [messages, setMessages] = useState([]),
@@ -32,7 +35,7 @@ export function useMultiplayer(position, notify, onInteraction) {
         setPlayer(null);
         setConnected(false);
         setPeers([]);
-        const base = import.meta.env.VITE_MULTIPLAYER_URL;
+        const base = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
         const url =
           base ||
           (import.meta.env.DEV
@@ -40,7 +43,7 @@ export function useMultiplayer(position, notify, onInteraction) {
             : null);
         if (!url) {
           setError(
-            "The shared island is not connected yet. You can still explore on your own.",
+            "아직 멀티플레이 서버가 연결되지 않았어요. 먼저 혼자 둘러볼 수 있어요.",
           );
           resolve(false);
           return;
@@ -53,7 +56,7 @@ export function useMultiplayer(position, notify, onInteraction) {
           ws = new WebSocket(url);
         } catch {
           setJoining(false);
-          setError("The multiplayer address is unavailable.");
+          setError("멀티플레이 서버 주소를 확인할 수 없어요.");
           resolve(false);
           return;
         }
@@ -65,9 +68,7 @@ export function useMultiplayer(position, notify, onInteraction) {
           pending.current = null;
         };
         joinTimer.current = setTimeout(() => {
-          setError(
-            "The island is taking a little longer to wake up. Please try again.",
-          );
+          setError("서버 연결이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
           finish(false);
           ws.close();
         }, 18000);
@@ -177,7 +178,7 @@ export function useMultiplayer(position, notify, onInteraction) {
         ws.onerror = () => {
           if (socket.current === ws) {
             setError(
-              "The shared island is unavailable right now. Try again in a moment.",
+              "지금은 멀티플레이 서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.",
             );
             finish(false);
           }
@@ -220,7 +221,7 @@ export function useMultiplayer(position, notify, onInteraction) {
         sendTimer.current = setTimeout(() => {
           pendingSend.current?.(false);
           pendingSend.current = null;
-          notify("Your message was not confirmed. Please try again.");
+          notify("메시지 전송을 확인하지 못했어요. 다시 시도해 주세요.");
         }, 5000);
         socket.current.send(JSON.stringify({ type: "chat", text }));
       }),
@@ -322,6 +323,7 @@ export function useMultiplayer(position, notify, onInteraction) {
     };
   }, [position]);
   return {
+    configured,
     player,
     peers,
     messages,

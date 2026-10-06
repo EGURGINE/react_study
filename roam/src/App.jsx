@@ -794,45 +794,76 @@ export default function App() {
               <Leaf size={34} strokeWidth={1.4} />
             </div>
             <h2 id="modal-title">
-              어떤 이름으로
-              <br />
-              만날까요?
+              {multiplayer.configured ? (
+                <>
+                  어떤 이름으로
+                  <br />
+                  만날까요?
+                </>
+              ) : (
+                <>
+                  함께할 공간을
+                  <br />
+                  준비하고 있어요.
+                </>
+              )}
             </h2>
             <p className="modal-intro">
-              최대 10명이 함께 머무는 작은 아지트예요.
-              <br />
-              이름을 정하고, 편하게 놀다 가세요.
-            </p>
-            <form onSubmit={join}>
-              <label className="form-label" htmlFor="nickname">
-                나를 부를 이름
-              </label>
-              <input
-                id="nickname"
-                className="nickname-input"
-                placeholder="닉네임을 알려 주세요"
-                maxLength={18}
-                minLength={2}
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                autoComplete="nickname"
-                autoFocus
-                required
-              />
-              {multiplayer.error && (
-                <p className="form-error" role="alert">
-                  {multiplayer.error}
-                </p>
+              {multiplayer.configured ? (
+                <>
+                  최대 10명이 함께 머무는 작은 아지트예요.
+                  <br />
+                  이름을 정하고, 편하게 놀다 가세요.
+                </>
+              ) : (
+                <>
+                  멀티플레이 서버가 아직 연결되지 않았어요.
+                  <br />
+                  지금은 혼자 아지트를 둘러볼 수 있어요.
+                </>
               )}
-              <button
-                className="primary-button join-button"
-                disabled={multiplayer.joining || nickname.trim().length < 2}
-              >
-                {multiplayer.joining ? "자리를 찾고 있어요…" : "같이 놀러 가기"}
-                <Leaf size={16} />
-              </button>
-            </form>
-            <button className="solo-button" onClick={close}>
+            </p>
+            {multiplayer.configured && (
+              <form onSubmit={join}>
+                <label className="form-label" htmlFor="nickname">
+                  나를 부를 이름
+                </label>
+                <input
+                  id="nickname"
+                  className="nickname-input"
+                  placeholder="닉네임을 알려 주세요"
+                  maxLength={18}
+                  minLength={2}
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  autoComplete="nickname"
+                  autoFocus
+                  required
+                />
+                {multiplayer.error && (
+                  <p className="form-error" role="alert">
+                    {multiplayer.error}
+                  </p>
+                )}
+                <button
+                  className="primary-button join-button"
+                  disabled={multiplayer.joining || nickname.trim().length < 2}
+                >
+                  {multiplayer.joining
+                    ? "자리를 찾고 있어요…"
+                    : "같이 놀러 가기"}
+                  <Leaf size={16} />
+                </button>
+              </form>
+            )}
+            <button
+              className={
+                multiplayer.configured
+                  ? "solo-button"
+                  : "primary-button join-button"
+              }
+              onClick={close}
+            >
               먼저 혼자 둘러볼게요
             </button>
           </>
