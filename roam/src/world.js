@@ -189,7 +189,7 @@ export function createWorld(host, callbacks) {
   function keydown(e){if(paused||e.target instanceof HTMLElement&&e.target.closest('input,textarea,select,[contenteditable="true"]'))return;if(['Enter','Space'].includes(e.code)&&e.target instanceof HTMLElement&&e.target.closest('button'))return;const accepted=['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight','KeyR','KeyE','Enter'];if(accepted.includes(e.code)){e.preventDefault();keys.add(e.code);}if(e.repeat)return;if(e.code==='KeyR')reset();if((e.code==='KeyE'||e.code==='Enter')&&near)callbacks.onInteract(near);}
   function keyup(e){keys.delete(e.code);}
   window.addEventListener('keydown',keydown);window.addEventListener('keyup',keyup);window.addEventListener('blur',clearInput);document.addEventListener('visibilitychange',clearInput);
-  function reset(){car.position.set(START.x,0,START.z);heading=START.heading;speed=0;jump=0;jumpVelocity=0;clearInput();callbacks.onReset?.();}
+  function reset(){if(callbacks.onReset?.()===true)return;car.position.set(START.x,0,START.z);heading=START.heading;speed=0;jump=0;jumpVelocity=0;clearInput();}
   function soundOn(enabled){sound=enabled;if(enabled){try{audioContext??=new AudioContext();audioContext.resume();if(!osc){osc=audioContext.createOscillator();gain=audioContext.createGain();osc.type='sine';gain.gain.value=.015;osc.connect(gain);gain.connect(audioContext.destination);osc.start();}}catch{sound=false;}}if(gain)gain.gain.setTargetAtTime(enabled?.018:0,audioContext.currentTime,.2);}
   function project(x,y,z){vec.set(x,y,z).project(camera);return {x:(vec.x+1)/2*width,y:(1-vec.y)/2*height};}
   function step(time){

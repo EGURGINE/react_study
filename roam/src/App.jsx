@@ -50,7 +50,7 @@ export default function App() {
     try{world.current=createWorld(canvasRef.current,{onFrame:s=>{stateRef.current=s;setState(s);},onInteract:open,onMove:()=>setMoved(true),onReset:()=>multiplayer.teleport('start')});setReady(true);}catch(e){console.error(e);setError(true);}
     return()=>{world.current?.dispose();world.current=null;clearTimeout(toastTimer.current);};
   },[open]);
-  useEffect(()=>{world.current?.setPaused(Boolean(section));},[section]);
+  useEffect(()=>{world.current?.setPaused(Boolean(section)||multiplayer.traveling);},[section,multiplayer.traveling]);
   useEffect(()=>{world.current?.setPeers(multiplayer.peers);},[multiplayer.peers]);
   useEffect(()=>{world.current?.setIdentity(multiplayer.player);},[multiplayer.player]);
   useEffect(()=>{if(multiplayer.correction)world.current?.setPosition(multiplayer.correction);},[multiplayer.correction]);
@@ -58,10 +58,10 @@ export default function App() {
   useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:'smooth',block:'nearest'});},[multiplayer.messages,chatOpen]);
   useEffect(()=>{if(ready&&!sessionStorage.getItem('roam-entry-seen')){setSection('join');sessionStorage.setItem('roam-entry-seen','1');}},[ready]);
   async function join(e){e.preventDefault();if(await multiplayer.join(nickname)){setSection(null);setChatOpen(true);}}
-  async function send(e){e.preventDefault();if(!draft.trim())return;if(await multiplayer.send(draft)){setDraft('');}}
+  async function send(e){e.preventDefault();const submitted=draft;if(!submitted.trim())return;if(await multiplayer.send(submitted)){setDraft(current=>current===submitted?'':current);}}
   function reset(){world.current?.reset();}
-  function visit(id){world.current?.goTo(id);multiplayer.teleport(id);setSection(null);notify(id==='play'?'Drive onto the round trampoline. A little airtime awaits!':'You’re here. Press E to take a look around.');}
-  const close=()=>setSection(null);
+  function visit(id){if(!multiplayer.teleport(id))world.current?.goTo(id);setSection(null);notify(id==='play'?'Drive onto the round trampoline. A little airtime awaits!':'You’re here. Press E to take a look around.');}
+  const close=()=>{if(section==='join')multiplayer.cancelJoin();setSection(null);};
   const nearZone=ZONES.find(z=>z.id===state.near);
 
   return <main className="app">
