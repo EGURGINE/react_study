@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "server": "node server/index.js",
+    "host:pc": "node scripts/host-pc.mjs",
     "start": "node server/index.js",
     "test": "node --test server/index.test.js src/navigation.test.js src/attractions.test.js",
     "dev:all": "node scripts/dev.mjs"

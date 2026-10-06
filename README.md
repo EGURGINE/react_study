@@ -48,6 +48,28 @@ npm run build  # 정적 배포 파일 → roam/dist
 
 GitHub Pages에서는 WebSocket 서버를 실행할 수 없습니다. `server/index.js`는 별도 Node.js 서비스로 실행합니다. 저장소 루트의 `render.yaml`은 Render 배포용 설정입니다.
 
+### 내 Windows PC를 서버로 사용하기
+
+현재 PC에서 서버를 실행하고 Cloudflare Quick Tunnel로 연결할 수 있습니다. 공유기 포트 개방 없이 이 앱의 서버만 연결하며, PC와 실행 프로그램이 켜져 있어야 합니다.
+
+1. [Cloudflare 공식 배포판](https://github.com/cloudflare/cloudflared/releases)에서 Windows용 `cloudflared`를 받습니다. 이 작업 PC에는 저장소 루트의 `.task-tools/cloudflared.exe`로 준비되어 있습니다. 다른 경로에 설치했으면 `CLOUDFLARED_PATH` 환경 변수에 실행 파일 경로를 지정하거나 PATH에 등록합니다.
+2. 기존 `npm run server` / `npm run dev:all`의 서버를 종료한 뒤 다음 명령을 실행합니다. 3001 포트를 이미 사용 중이면 다른 프로세스를 자동 종료하지 않고 중단합니다.
+
+```powershell
+cd roam
+npm run host:pc
+```
+
+Windows에서는 루트의 `start-server.cmd`를 더블클릭해도 같은 명령이 실행됩니다.
+
+3. 출력되는 `wss://...trycloudflare.com/ws` 주소를 저장소 **Settings → Secrets and variables → Actions → Variables → VITE_MULTIPLAYER_URL**에 설정합니다.
+4. **Actions → Deploy roam to GitHub Pages → Run workflow**를 실행합니다. 완료되면 친구에게 GitHub Pages 주소를 공유합니다.
+5. 서버를 끄려면 실행 창에서 **Ctrl+C**를 누릅니다. 로컬 서버와 이 명령이 시작한 터널이 함께 종료됩니다.
+
+Quick Tunnel은 테스트용으로, **재시작하면 서버 주소가 달라지므로 3~4단계를 다시 진행해야 합니다.** PC 절전·종료·인터넷 끊김 동안 멀티플레이를 사용할 수 없고, 서버 재시작 시 채팅·사진은 초기화됩니다. 고정 주소로 상시 운영하려면 Cloudflare 계정과 본인 도메인을 연결한 정식 Tunnel을 사용합니다. [Cloudflare 안내](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+
+### 별도 호스팅을 사용하는 경우
+
 1. Render에서 **New → Blueprint**를 선택하고 이 GitHub 저장소를 연결합니다.
 2. `roam-multiplayer` 서비스를 생성합니다. 무료 플랜으로 구성되어 있습니다.
 3. 발급된 서비스 URL이 `https://이름.onrender.com`이면, GitHub 저장소 **Settings → Secrets and variables → Actions → Variables**에 `VITE_MULTIPLAYER_URL=wss://이름.onrender.com/ws`를 추가합니다.
