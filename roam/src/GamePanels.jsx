@@ -127,15 +127,37 @@ const BODY_ART = {
     body: "M12 46L31 40L48 24H72L87 36L109 44L105 54H12Z",
     glass: "M41 39L51 27H70L83 39Z",
   },
+  motorbike: {
+    body: "M16 34L39 34L47 40L61 30L75 29L92 22L103 31L81 40L70 51L48 48L39 40L18 39Z",
+    glass: "M80 27L84 15H90L94 23Z",
+  },
+  wedge: {
+    body: "M10 42L32 37L51 25H74L88 37L111 47L107 55H11Z",
+    glass: "M42 37L54 28H72L82 37Z",
+  },
+  limousine: {
+    body: "M9 40H24L37 22H75L87 38H111V55H9Z",
+    glass: "M31 37L42 26H57V37ZM62 26H72L80 37H62Z",
+  },
 };
 
 function CarArt({ item }) {
   const art = BODY_ART[item.style] || BODY_ART.jeep;
   const monster = item.style === "monster";
   const formula = item.style === "formula";
-  const wheelRadius = monster ? 15 : formula ? 12 : 11;
+  const motorbike = item.style === "motorbike";
+  const wheelRadius = monster
+    ? 15
+    : motorbike
+      ? 13
+      : formula
+        ? 12
+        : item.style === "wedge"
+          ? 10
+          : 11;
   const wheelY = monster ? 55 : 56;
-  const wheelX = formula ? [27, 92] : [33, 89];
+  const wheelX =
+    formula || motorbike || item.style === "limousine" ? [27, 92] : [33, 89];
   const mythic = item.rarity === "mythic";
   return (
     <svg
@@ -175,7 +197,7 @@ function CarArt({ item }) {
       ))}
       <path d={art.body} fill="currentColor" />
       <path d={art.glass} fill={mythic ? "#304c66" : "#6f9389"} />
-      {!monster && (
+      {!monster && !motorbike && (
         <path
           d="M18 51H104"
           stroke={mythic ? "#b8ecf0" : "#f4f1d9"}
@@ -183,7 +205,7 @@ function CarArt({ item }) {
         />
       )}
       <path
-        d={monster ? "M93 34H101" : "M98 44H105"}
+        d={monster ? "M93 34H101" : motorbike ? "M95 28L101 30" : "M98 44H105"}
         stroke="#fff8d6"
         strokeWidth="3"
       />
@@ -293,6 +315,49 @@ function CarArt({ item }) {
           <path d="M20 31H38" stroke="#34465b" strokeWidth="4" />
         </g>
       )}
+      {motorbike && (
+        <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+          <path
+            d="M27 56L47 42L58 54L72 37L92 56"
+            stroke="#45575b"
+            strokeWidth="4"
+          />
+          <path
+            d="M86 34L95 55M68 27L78 22H86"
+            stroke="#d6e5de"
+            strokeWidth="2.5"
+          />
+          <path d="M23 33H42L47 37" stroke="#5c5250" strokeWidth="5" />
+          <path d="M35 53H55" stroke="#c7d7ce" strokeWidth="4" />
+        </g>
+      )}
+      {item.style === "wedge" && (
+        <g>
+          <path d="M45 42L69 40L59 49H42Z" fill="#3b5351" />
+          <path
+            d="M85 39L103 46M91 39L107 45"
+            stroke="#f2ffe3"
+            strokeWidth="1.6"
+          />
+          <path
+            d="M12 39H31M14 49L25 45M78 51H107"
+            stroke="#43544b"
+            strokeWidth="3"
+          />
+        </g>
+      )}
+      {item.style === "limousine" && (
+        <g fill="none">
+          <path d="M38 23H74" stroke="#e7e2d5" strokeWidth="4" />
+          <path d="M60 27V48M28 41H104" stroke="#d6dfdc" strokeWidth="1.3" />
+          <path
+            d="M106 39V52M109 39V52M40 42H48M64 42H72"
+            stroke="#eef2e8"
+            strokeWidth="2"
+          />
+          <path d="M88 37H111" stroke="#d9e2df" strokeWidth="2" />
+        </g>
+      )}
     </svg>
   );
 }
@@ -361,7 +426,7 @@ export function Wallet({ coins = 0, onClick, compact = false }) {
   );
 }
 
-function ItemArt({ item, size = "" }) {
+export function ItemArt({ item, size = "" }) {
   const Icon =
     item.type === "trail"
       ? TRAIL_ICONS[item.style] || Sparkles

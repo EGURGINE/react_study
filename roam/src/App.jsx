@@ -44,6 +44,7 @@ import { preparePhoto } from "./photos.js";
 import { useGallery } from "./gallery.js";
 import { useArenaHonors } from "./arenaHonors.js";
 import { ArenaChampion, ArenaHonorsPanel } from "./ArenaHonors.jsx";
+import { AttendanceButton, AttendancePanel } from "./AttendancePanel.jsx";
 import {
   GaragePanel,
   ArenaPanel,
@@ -133,7 +134,11 @@ function Modal({ section, onClose, children }) {
     if (section === "work") {
       ref.current.scrollTop =
         previousSection.current === "photo" ? galleryScroll.current : 0;
-    } else if (section === "photo" || section === "honors") {
+    } else if (
+      section === "photo" ||
+      section === "honors" ||
+      section === "attendance"
+    ) {
       ref.current.scrollTop = 0;
     }
     previousSection.current = section;
@@ -145,7 +150,7 @@ function Modal({ section, onClose, children }) {
   return (
     <dialog
       ref={ref}
-      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""} ${section === "about" || section === "play" ? "game-modal" : ""}`}
+      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""} ${section === "about" || section === "play" ? "game-modal" : ""} ${section === "attendance" ? "attendance-modal" : ""}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -432,7 +437,8 @@ export default function App() {
   };
   const chatEnd = useRef(null),
     toastTimer = useRef(),
-    railAfterJoin = useRef(false);
+    railAfterJoin = useRef(false),
+    attendanceAfterJoin = useRef(false);
   const notify = useCallback((text) => {
     setToast(text);
     clearTimeout(toastTimer.current);
@@ -536,6 +542,10 @@ export default function App() {
     world.current?.setCosmetics(multiplayer.profile?.equipped);
   }, [multiplayer.profile?.equipped]);
   useEffect(() => {
+    if (section === "attendance" && multiplayer.connected)
+      multiplayer.refreshAttendance();
+  }, [section, multiplayer.connected, multiplayer.refreshAttendance]);
+  useEffect(() => {
     world.current?.setRace(multiplayer.currentRace);
     if (
       multiplayer.currentRace?.status === "countdown" ||
@@ -636,6 +646,7 @@ export default function App() {
     if (section === "join") {
       multiplayer.cancelJoin();
       railAfterJoin.current = false;
+      attendanceAfterJoin.current = false;
     }
     if (section === "photo" && photoView?.archived) {
       setSection("work");
@@ -646,7 +657,8 @@ export default function App() {
   async function join(e) {
     e.preventDefault();
     if (await multiplayer.join(nickname)) {
-      setSection(null);
+      setSection(attendanceAfterJoin.current ? "attendance" : null);
+      attendanceAfterJoin.current = false;
       setChatOpen(true);
       if (railAfterJoin.current) {
         railAfterJoin.current = false;
@@ -822,6 +834,11 @@ export default function App() {
           </button>
         </nav>
         <div className="header-right">
+          <AttendanceButton
+            attendance={multiplayer.profile?.attendance}
+            connected={multiplayer.connected}
+            onClick={() => open("attendance")}
+          />
           <Wallet
             coins={multiplayer.profile?.coins || 0}
             onClick={() => open("about")}
@@ -1567,6 +1584,16 @@ export default function App() {
           />
         )}
         {section === "honors" && <ArenaHonorsPanel record={arenaHonors} />}
+        {section === "attendance" && (
+          <AttendancePanel
+            multiplayer={multiplayer}
+            onJoin={() => {
+              attendanceAfterJoin.current = true;
+              open("join");
+            }}
+            onGarage={() => open("about")}
+          />
+        )}
         {section === "play" && (
           <>
             <button className="play-honors-link" onClick={() => open("honors")}>

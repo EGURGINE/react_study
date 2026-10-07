@@ -18,6 +18,7 @@ import {
   createCosmeticsEffects,
   createSprayCanvas,
 } from "./cosmeticsWorld.js";
+import { CAR_WHEELS, CAR_LAMPS } from "./carModels.js";
 
 const original = [
   ["body-starter", "common", "처음의 지프", "#efaa8c", "jeep"],
@@ -53,9 +54,9 @@ function disposeScene(scene) {
 }
 
 test("expanded catalog preserves saved items and exposes every item to the game", () => {
-  assert.equal(ITEMS.length, 108);
-  assert.equal(new Set(ITEMS.map((item) => item.id)).size, 108);
-  assert.equal(new Set(ITEMS.map((item) => item.name)).size, 108);
+  assert.equal(ITEMS.length, 111);
+  assert.equal(new Set(ITEMS.map((item) => item.id)).size, 111);
+  assert.equal(new Set(ITEMS.map((item) => item.name)).size, 111);
   assert.equal(configuredItems, ITEMS);
   assert.deepEqual(
     Object.fromEntries(
@@ -64,7 +65,7 @@ test("expanded catalog preserves saved items and exposes every item to the game"
         ITEMS.filter((item) => item.type === type).length,
       ]),
     ),
-    { body: 43, trail: 31, spray: 34 },
+    { body: 46, trail: 31, spray: 34 },
   );
   for (const [id, rarity, name, color, style] of original) {
     const expected = { id, type: id.split("-")[0], rarity, name, color, style };
@@ -87,9 +88,112 @@ test("expanded catalog preserves saved items and exposes every item to the game"
     assert.equal(ITEM_BY_ID.get(item.id), item);
   }
   const mythics = ITEMS.filter((item) => item.rarity === "mythic");
-  assert.equal(mythics.length, 5);
-  assert.equal(new Set(mythics.map((item) => item.style)).size, 5);
+  assert.equal(mythics.length, 8);
+  assert.equal(new Set(mythics.map((item) => item.style)).size, 8);
   assert.ok(mythics.every((item) => item.type === "body" && !item.starter));
+});
+
+test("new mythic bodies preserve wheel animation pivots and restore lamps after the motorcycle", () => {
+  const car = new THREE.Group(),
+    body = new THREE.Group();
+  car.add(body);
+  const base = new THREE.Mesh(
+    new THREE.BoxGeometry(),
+    new THREE.MeshStandardMaterial(),
+  );
+  base.userData.isBody = true;
+  body.add(base);
+  const pivots = [];
+  for (const side of [-1, 1]) {
+    for (const axle of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.59, 0.31, axle * 0.64);
+      for (const radius of [0.32, 0.17]) {
+        const wheel = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius, radius, 0.24, 12),
+          new THREE.MeshStandardMaterial(),
+        );
+        wheel.rotation.z = Math.PI / 2;
+        pivot.add(wheel);
+      }
+      car.add(pivot);
+      pivots.push(pivot);
+    }
+  }
+  installCarBodies(body);
+  const emitters = new THREE.Group();
+  emitters.name = "vehicle-night-emitters";
+  body.add(emitters);
+  for (const side of [-1, 1]) {
+    for (const front of [true, false]) {
+      const lamp = new THREE.Mesh(
+        new THREE.BoxGeometry(0.23, 0.16, 0.04),
+        new THREE.MeshStandardMaterial(),
+      );
+      lamp.position.set(
+        side * 0.425,
+        front ? 0.605 : 0.58,
+        front ? 1.11 : -1.11,
+      );
+      emitters.add(lamp);
+    }
+  }
+  const cycle = [
+    "body-mythic-zephyr",
+    "body-mythic-astra",
+    "body-mythic-zephyr",
+    "body-mythic-regal",
+    "body-starter",
+  ];
+  for (const id of cycle) {
+    applyCarCosmetics(car, { body: id });
+    const style = ITEM_BY_ID.get(id).style;
+    const bike = style === "motorbike";
+    const [spread, axle, radius] = CAR_WHEELS[style];
+    assert.equal(pivots.filter((pivot) => pivot.visible).length, bike ? 2 : 4);
+    for (const pivot of pivots.filter((pivot) => pivot.visible)) {
+      assert.equal(Math.abs(pivot.position.x), spread);
+      assert.equal(Math.abs(pivot.position.z), axle);
+      assert.equal(pivot.position.y, radius - 0.01);
+      assert.equal(pivot.children.length, 2);
+    }
+    const layout = CAR_LAMPS[style] || CAR_LAMPS.default;
+    const visibleLamps = emitters.children.filter((lamp) => lamp.visible);
+    assert.equal(visibleLamps.length, bike ? 2 : 4);
+    for (const lamp of visibleLamps) {
+      assert.equal(Math.abs(lamp.position.x), layout[0]);
+      assert.equal(
+        lamp.position.z,
+        lamp.userData.carLamp.front ? layout[2] : layout[4],
+      );
+      assert.equal(lamp.scale.x, layout[5]);
+    }
+    if (bike) {
+      const peer = car.clone(true);
+      applyCarCosmetics(peer, { body: "body-mythic-regal" });
+      let visibleWheels = 0;
+      peer.traverse((object) => {
+        if (object.userData.carWheel && object.visible) visibleWheels++;
+      });
+      assert.equal(
+        visibleWheels,
+        4,
+        "a peer cloned from a motorcycle can equip a four-wheel body",
+      );
+      assert.equal(
+        peer
+          .getObjectByName("vehicle-night-emitters")
+          .children.filter((lamp) => lamp.visible).length,
+        4,
+      );
+      assert.equal(
+        pivots.filter((pivot) => pivot.visible).length,
+        2,
+        "peer changes do not alter local wheel visibility",
+      );
+    }
+  }
+  disposeScene(car);
 });
 
 test("every body unlock selects exactly one supported, independently colored shell", () => {

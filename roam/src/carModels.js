@@ -18,6 +18,18 @@ export const CAR_WHEELS = Object.freeze({
   "aurora-gt": [0.71, 0.69, 0.29, 0.28],
   solstice: [0.73, 0.7, 0.28, 0.28],
   phantom: [0.78, 0.73, 0.28, 0.32],
+  motorbike: [0, 0.75, 0.36, 0.17],
+  wedge: [0.76, 0.74, 0.28, 0.3],
+  limousine: [0.69, 0.84, 0.33, 0.25],
+});
+
+// [half spread, front Y/Z, rear Y/Z, lens width/height scale]. Shell housings
+// and the existing shared glow meshes use the same layout when equipping.
+export const CAR_LAMPS = Object.freeze({
+  default: [0.425, 0.605, 1.11, 0.58, -1.11, 1, 1],
+  motorbike: [0, 0.99, 1.11, 0.87, -1.11, 0.72, 0.82],
+  wedge: [0.485, 0.49, 1.13, 0.58, -1.13, 1.12, 0.65],
+  limousine: [0.48, 0.74, 1.285, 0.68, -1.285, 1.12, 1.05],
 });
 
 /** Build a shell from shaped cross-sections and slanted glazing, then merge
@@ -215,10 +227,27 @@ export function buildCarShell(shell, style) {
     box("cream", width, 0.012, length, x, y, z, slope);
   }
   function lights() {
-    // All geometry stays behind the shared emitters at Z +/-1.11.
-    for (const x of [-0.425, 0.425]) {
-      box("frontLamp", 0.22, 0.14, 0.035, x, 0.605, 1.035);
-      box("rearLamp", 0.2, 0.115, 0.035, x, 0.58, -1.035);
+    const [spread, frontY, frontZ, rearY, rearZ, width, height] =
+      CAR_LAMPS[style] || CAR_LAMPS.default;
+    for (const x of spread ? [-spread, spread] : [0]) {
+      box(
+        "frontLamp",
+        0.22 * width,
+        0.14 * height,
+        0.035,
+        x,
+        frontY,
+        frontZ - 0.075,
+      );
+      box(
+        "rearLamp",
+        0.2 * width,
+        0.115 * height,
+        0.035,
+        x,
+        rearY,
+        rearZ + 0.075,
+      );
     }
   }
 
@@ -572,6 +601,116 @@ export function buildCarShell(shell, style) {
       );
     }
     box("carbon", 1.45, 0.045, 0.2, 0, 0.86, -0.91);
+  } else if (style === "motorbike") {
+    // A narrow exposed frame, single saddle and two real wheel pivots keep
+    // this silhouette distinct from the four-wheel cars, without a rider rig.
+    loft("paint", [
+      [-1.025, 0.22, 0.77, 0.89],
+      [-0.64, 0.37, 0.7, 0.96],
+      [-0.25, 0.43, 0.54, 0.8],
+      [0.24, 0.4, 0.56, 1.02],
+      [0.69, 0.32, 0.69, 1.1],
+      [1.035, 0.21, 0.87, 1.04],
+    ]);
+    box("seat", 0.32, 0.095, 0.5, 0, 0.92, -0.45, 0.05);
+    loft("carbon", [
+      [-0.43, 0.29, 0.38, 0.67],
+      [0.2, 0.34, 0.38, 0.75],
+      [0.45, 0.22, 0.43, 0.67],
+    ]);
+    for (const side of [-1, 1]) {
+      const x = side * 0.13;
+      bar("chrome", [x, 0.89, 0.37], [x, 0.35, 0.75], 0.035);
+      bar("carbon", [x, 0.43, 0.08], [x, 0.35, -0.75], 0.037);
+      bar("chrome", [x, 0.43, 0.08], [x, 0.75, -0.4], 0.025);
+      box("chrome", 0.23, 0.05, 0.11, side * 0.2, 0.42, -0.11);
+      box("carbon", 0.17, 0.075, 0.09, side * 0.27, 1.12, 0.34);
+      bar("chrome", [side * 0.1, 1.02, 0.48], [side * 0.28, 1.12, 0.34]);
+    }
+    add(
+      new THREE.CylinderGeometry(0.085, 0.085, 0.58, 10),
+      "chrome",
+      [0.2, 0.5, -0.43],
+      [Math.PI / 2, 0, 0],
+    );
+    windshield(0.27, 1.025, 1.23, 0.83, 0.62);
+    box("paint", 0.24, 0.065, 0.42, 0, 0.755, 0.75, -0.1);
+    box("carbon", 0.2, 0.05, 0.34, 0, 0.77, -0.74, 0.12);
+  } else if (style === "wedge") {
+    loft("paint", [
+      [-1.045, 1.4, 0.3, 0.68],
+      [-0.7, 1.51, 0.3, 0.77],
+      [-0.25, 1.28, 0.3, 0.7],
+      [0.32, 1.39, 0.3, 0.64],
+      [0.77, 1.48, 0.3, 0.48],
+      [1.04, 1.2, 0.3, 0.39],
+    ]);
+    cabin({
+      front: 0.66,
+      rear: -0.68,
+      roofFront: 0.12,
+      roofRear: -0.32,
+      width: 1.0,
+      base: 0.64,
+      roof: 0.94,
+    });
+    aero(1.55);
+    for (const side of [-1, 1]) {
+      panel("carbon", [
+        [side * 0.657, 0.42, -0.48],
+        [side * 0.69, 0.69, -0.41],
+        [side * 0.69, 0.57, 0.17],
+        [side * 0.665, 0.36, 0.03],
+      ]);
+      bar(
+        "chrome",
+        [side * 0.16, 0.43, 0.96],
+        [side * 0.55, 0.58, 0.58],
+        0.012,
+      );
+      box("carbon", 0.21, 0.1, 0.07, side * 0.48, 0.36, 1.045, 0, side * 0.22);
+      box("chrome", 0.13, 0.075, 0.12, side * 0.28, 0.38, -1.01);
+    }
+    for (const z of [-0.44, -0.6, -0.76])
+      box("carbon", 0.7, 0.024, 0.065, 0, 0.786, z, -0.1);
+    box("carbon", 1.37, 0.065, 0.18, 0, 0.75, -0.98, -0.1);
+  } else if (style === "limousine") {
+    loft("paint", [
+      [-1.2, 1.27, 0.4, 0.8],
+      [-0.93, 1.4, 0.4, 0.88],
+      [-0.43, 1.4, 0.4, 0.86],
+      [0.54, 1.37, 0.4, 0.9],
+      [1.2, 1.29, 0.4, 0.84],
+    ]);
+    cabin({
+      front: 0.47,
+      rear: -0.91,
+      roofFront: 0.15,
+      roofRear: -0.63,
+      width: 1.14,
+      base: 0.84,
+      roof: 1.38,
+    });
+    loft("cream", [
+      [-0.66, 1.05, 1.398, 1.427],
+      [0.18, 0.99, 1.398, 1.427],
+    ]);
+    box("carbon", 0.54, 0.4, 0.05, 0, 0.69, 1.207);
+    for (const x of [-0.24, -0.16, -0.08, 0, 0.08, 0.16, 0.24])
+      box("chrome", 0.027, 0.37, 0.015, x, 0.7, 1.241);
+    box("chrome", 0.58, 0.045, 0.06, 0, 0.912, 1.21);
+    box("chrome", 1.24, 0.07, 0.055, 0, 0.46, 1.211);
+    box("chrome", 1.24, 0.07, 0.055, 0, 0.46, -1.211);
+    for (const side of [-1, 1]) {
+      bar("chrome", [side * 0.55, 0.915, 0.48], [side * 0.455, 1.36, 0.15]);
+      box("chrome", 0.025, 0.036, 1.88, side * 0.697, 0.825, -0.06);
+      box("paint", 0.045, 0.36, 0.055, side * 0.507, 1.12, -0.27);
+      for (const z of [-0.54, -0.04])
+        box("chrome", 0.035, 0.04, 0.15, side * 0.704, 0.81, z);
+      box("chrome", 0.1, 0.085, 0.14, side * 0.74, 0.98, 0.38);
+    }
+    // A plain inset hood line suggests formal coachwork without a brand badge.
+    stripe(0, 0.027, 0.913, 0.55, 0.86, 0.045);
   } else if (style === "sport") {
     loft("paint", [
       [-1.03, 1.17, 0.34, 0.69],

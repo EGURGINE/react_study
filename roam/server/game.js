@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createArenaController } from "./arena.js";
+import { createAttendanceController } from "./attendance.js";
 import {
   LAP_REWARD,
   CRATE_COST,
@@ -242,6 +243,7 @@ export function createGameEngine({
 } = {}) {
   mkdirSync(directory, { recursive: true });
   const db = new DatabaseSync(join(directory, "game.sqlite"));
+  let attendance;
   try {
     db.exec(`PRAGMA locking_mode = EXCLUSIVE; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 1000;
@@ -257,6 +259,7 @@ export function createGameEngine({
       id TEXT PRIMARY KEY, host_account TEXT NOT NULL REFERENCES accounts(id),
       guest_account TEXT REFERENCES accounts(id), stake INTEGER NOT NULL CHECK (stake > 0)
     );`);
+    attendance = createAttendanceController({ db, now, random, fail });
   } catch (error) {
     db.close();
     throw error;
@@ -286,6 +289,7 @@ export function createGameEngine({
     coins: row.coins,
     inventory: JSON.parse(row.inventory),
     equipped: JSON.parse(row.equipped),
+    attendance: attendance.status(row.id),
   });
   const profile = (playerId) => {
     const peer = peers.get(playerId);
@@ -663,6 +667,8 @@ export function createGameEngine({
       "arena:join": ["arenaId"],
       "arena:start": ["arenaId"],
       "arena:leave": ["arenaId"],
+      "attendance:claim": [],
+      "attendance:status": [],
       spray: [],
     };
     const allowed = Object.hasOwn(fields, data.action)
@@ -685,12 +691,13 @@ export function createGameEngine({
       JSON.stringify([data.action, ...allowed.map((field) => data[field])]),
     );
     const prior =
-      peer.receipts.get(requestId) ||
-      db
-        .prepare(
-          "SELECT * FROM receipts WHERE account_id = ? AND request_id = ?",
-        )
-        .get(peer.accountId, requestId);
+      data.action !== "attendance:status" &&
+      (peer.receipts.get(requestId) ||
+        db
+          .prepare(
+            "SELECT * FROM receipts WHERE account_id = ? AND request_id = ?",
+          )
+          .get(peer.accountId, requestId));
     if (prior) {
       if (prior.signature !== signature)
         return {
@@ -713,6 +720,9 @@ export function createGameEngine({
         code: "rate_limited",
         message: "잠시 후 다시 시도해 주세요.",
       };
+    // Refreshes are read-only, including when a tab crosses Korean midnight.
+    if (data.action === "attendance:status")
+      return { ...base, ok: true, profile: profile(playerId) };
     const remember = (response) => {
       peer.receipts.set(requestId, {
         signature,
@@ -727,7 +737,9 @@ export function createGameEngine({
       const result = transaction(() => {
         const current = profile(playerId);
         let details = {};
-        if (data.action.startsWith("arena:")) {
+        if (data.action === "attendance:claim") {
+          details = attendance.claim(peer.accountId, time);
+        } else if (data.action.startsWith("arena:")) {
           const planned = arena.plan(playerId, data, time);
           details = planned.details;
           effect = planned.effect;
@@ -929,6 +941,7 @@ export function createGameEngine({
         const response = { ...base, ok: true, ...details };
         if (
           data.action === "crate" ||
+          data.action === "attendance:claim" ||
           data.action.startsWith("race:") ||
           data.action.startsWith("arena:")
         ) {

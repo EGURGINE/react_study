@@ -15,6 +15,9 @@ export const BODY_STYLES = Object.freeze([
   "aurora-gt",
   "solstice",
   "phantom",
+  "motorbike",
+  "wedge",
+  "limousine",
 ]);
 export const TRAIL_STYLES = Object.freeze([
   "none",
@@ -261,6 +264,9 @@ export const ITEMS = Object.freeze(
       ["mythic-aurora", "오로라 GT", "mythic", "#b299ed", "aurora-gt"],
       ["mythic-solstice", "솔스티스", "mythic", "#edc769", "solstice"],
       ["mythic-phantom", "팬텀 제로", "mythic", "#697386", "phantom"],
+      ["mythic-zephyr", "제피르 R", "mythic", "#59c9b2", "motorbike"],
+      ["mythic-astra", "아스트라 V12", "mythic", "#d6e46e", "wedge"],
+      ["mythic-regal", "레갈 크라운", "mythic", "#667793", "limousine"],
     ]),
     ...variants("trail", [
       ["sandy", "모래 발자국", "common", "#d5b77f", "dust"],

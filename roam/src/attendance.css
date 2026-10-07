@@ -1,0 +1,295 @@
+.attendance-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 13px;
+  border: 1px solid var(--ui-border, #dce1d3);
+  border-radius: 25px;
+  color: var(--ui-ink, #354839);
+  background: var(--ui-panel, #f8f6ee);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.attendance-button > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ui-accent, #73975c);
+}
+.social-app .attendance-modal {
+  width: min(790px, calc(100vw - 36px));
+}
+.attendance-panel {
+  color: var(--ui-ink, #354839);
+}
+.attendance-join {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 15px;
+  padding: 15px 17px;
+  margin-bottom: 22px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.attendance-join button,
+.attendance-refresh button,
+.attendance-garage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 0;
+  color: var(--ui-accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.attendance-refresh {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.attendance-cycle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.attendance-cycle small {
+  color: var(--ui-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+.attendance-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attendance-days > li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 13px 5px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  text-align: center;
+}
+.attendance-days > .has-vehicle {
+  background: color-mix(in srgb, var(--ui-panel) 94%, var(--ui-accent));
+}
+.attendance-days > .is-today {
+  border-color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-panel) 90%, var(--ui-accent));
+}
+.attendance-days > .is-received {
+  color: var(--ui-muted);
+}
+.attendance-days small {
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.attendance-day-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 43px;
+  margin: 6px 0;
+  color: var(--ui-accent);
+}
+.attendance-check {
+  position: absolute;
+  right: -1px;
+  bottom: 1px;
+  width: 17px;
+  height: 17px;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--ui-accent);
+  color: var(--ui-panel);
+}
+.attendance-days strong {
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.attendance-days strong > span {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+}
+.attendance-days .has-vehicle strong {
+  font-size: 12px;
+  padding-top: 2px;
+}
+.attendance-days em {
+  min-height: 17px;
+  margin-top: 9px;
+  color: var(--ui-accent);
+  font-size: 9px;
+  font-style: normal;
+}
+.attendance-current {
+  display: flex;
+  align-items: center;
+  gap: 19px;
+  margin: 25px 0 21px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ui-panel) 94%, var(--ui-accent));
+}
+.attendance-current-art {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 93px;
+  min-height: 75px;
+  color: var(--ui-accent);
+}
+.attendance-current-art .item-art.large {
+  width: 100px;
+  height: 83px;
+}
+.attendance-current-art .item-art.large > .item-car {
+  width: 100%;
+  height: auto;
+}
+.attendance-current-art .item-art.large > i {
+  width: 74px;
+  height: 74px;
+}
+.attendance-current > div:last-child {
+  min-width: 0;
+}
+.attendance-current small {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.attendance-current h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 550;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.attendance-current p {
+  margin: 8px 0 0;
+  color: var(--ui-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.attendance-rarity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-ink);
+}
+.attendance-rarity::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--attendance-rarity);
+}
+.attendance-actions {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  flex-wrap: wrap;
+}
+.attendance-claim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 46px;
+  padding: 12px 20px;
+  font-size: 12px;
+}
+.attendance-error {
+  margin: 0 0 12px;
+  color: var(--ui-ink);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.attendance-notes {
+  margin-top: 23px;
+  padding-top: 15px;
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-muted);
+  font-size: 10px;
+  line-height: 1.8;
+}
+.attendance-notes p {
+  margin: 4px 0;
+}
+@media (max-width: 700px) {
+  .attendance-button {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 9px;
+  }
+  .attendance-button > span {
+    display: none;
+  }
+  .attendance-button > i {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+  }
+  .attendance-days {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+  }
+  .attendance-days > li {
+    padding-top: 10px;
+  }
+  .attendance-day-icon {
+    height: 32px;
+    margin: 3px 0;
+  }
+  .attendance-days em {
+    margin-top: 5px;
+  }
+  .attendance-current {
+    gap: 10px;
+    padding: 15px 12px;
+  }
+  .attendance-current-art {
+    width: 64px;
+    min-height: 64px;
+  }
+  .attendance-current-art .item-art.large {
+    width: 70px;
+    height: 64px;
+  }
+  .attendance-current-art .item-art.large > i {
+    width: 54px;
+    height: 54px;
+  }
+  .attendance-current h3 {
+    font-size: 18px;
+  }
+  .attendance-actions {
+    gap: 8px 16px;
+  }
+}

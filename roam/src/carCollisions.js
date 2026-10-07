@@ -3,13 +3,13 @@ export const CAR_CONTACT = Object.freeze({
   cooldown: 700,
   immunity: 500,
   stale: 450,
-  // At an ordinary 7 m/s approach, each balanced car rebounds at one quarter
-  // of the island bumper's 10 m/s kick. The cap includes light-car mass sharing.
+  // Field contacts are three times the former quarter-bumper response.
+  // Scale the floor and cap too, preserving light/heavy momentum sharing.
   bumperImpulse: 10,
-  bumperFraction: 0.25,
+  bumperFraction: 0.75,
   referenceClosingSpeed: 7,
-  minImpulse: 1.1,
-  maxImpulse: 4,
+  minImpulse: 3.3,
+  maxImpulse: 12,
 });
 export const ARENA_CAR_CONTACT = Object.freeze({
   minImpulse: 1.8,

@@ -18,7 +18,7 @@ const simulate = (profile, seconds, fps = 60, input = { throttle: 1 }) => {
   }
   return { speed, distance };
 };
-test("all 15 shapes have bounded shared stats and paint never changes performance", () => {
+test("all 18 shapes have bounded shared stats and paint never changes performance", () => {
   assert.deepEqual(
     Object.keys(VEHICLE_PROFILES).sort(),
     [...BODY_STYLES].sort(),
@@ -36,6 +36,9 @@ test("all 15 shapes have bounded shared stats and paint never changes performanc
     ])
       assert.ok(Number.isFinite(profile[field]) && profile[field] > 0);
     assert.ok(profile.topSpeed < profile.boostSpeed && profile.boostSpeed < 22);
+    assert.ok(profile.mass >= 0.7 && profile.mass <= 1.8);
+    assert.ok(profile.bounce >= 0.68 && profile.bounce <= 1.3);
+    assert.ok(profile.boostSpeed <= 16.6);
   }
   assert.equal(
     getVehicleProfile("body-starter"),
@@ -49,6 +52,42 @@ test("all 15 shapes have bounded shared stats and paint never changes performanc
     { id: "missing", style: "venom", mass: 999 },
   ])
     assert.equal(getVehicleProfile(bad), VEHICLE_PROFILES.jeep);
+});
+
+test("new mythic motorcycle, wedge and luxury sedan retain distinct handling within server bounds", () => {
+  const bike = getVehicleProfile("body-mythic-zephyr");
+  const supercar = getVehicleProfile("body-mythic-astra");
+  const sedan = getVehicleProfile("body-mythic-regal");
+  assert.equal(bike, VEHICLE_PROFILES.motorbike);
+  assert.equal(supercar, VEHICLE_PROFILES.wedge);
+  assert.equal(sedan, VEHICLE_PROFILES.limousine);
+  assert.ok(simulate(bike, 0.5).speed > simulate(supercar, 0.5).speed);
+  assert.ok(simulate(bike, 0.5).speed > simulate(sedan, 0.5).speed * 1.5);
+  assert.ok(simulate(supercar, 10).distance > simulate(bike, 10).distance);
+  assert.ok(
+    bike.steering > supercar.steering && supercar.steering > sedan.steering,
+  );
+  assert.ok(sedan.mass > bike.mass * 2 && sedan.grip > bike.grip);
+  assert.ok(
+    obstacleResponse(10, 3.5, bike).speed >
+      obstacleResponse(10, 3.5, sedan).speed,
+  );
+  for (const profile of [bike, supercar, sedan]) {
+    assert.ok(obstacleResponse(10, 3.5, profile).speed < 22);
+    assert.equal(
+      simulate(profile, 15, 60, { throttle: 1, boost: true }).speed,
+      profile.boostSpeed,
+    );
+  }
+  assert.equal(
+    getVehicleProfile({
+      id: "body-mythic-zephyr",
+      style: "limousine",
+      mass: 999,
+    }),
+    bike,
+    "only the saved canonical body selects physics",
+  );
 });
 test("sports accelerate and travel faster; heavy bodies retain a distinct tradeoff", () => {
   const light = VEHICLE_PROFILES.solstice,

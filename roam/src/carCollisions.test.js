@@ -7,25 +7,25 @@ import {
   movementVelocity,
 } from "./carCollisions.js";
 const pose = (x, z = 0, y = 0) => ({ x, z, y, heading: Math.PI / 2 });
-test("ordinary rear-end contact gives both cars a quarter-bumper rebound", () => {
+test("field contacts push both cars three times farther across gentle, ordinary and capped impacts", () => {
   const hit = carContact(pose(-2), pose(-1), pose(0), { x: 7, z: 0 });
-  assert.equal(CAR_CONTACT.bumperFraction, 0.25);
+  assert.equal(CAR_CONTACT.bumperFraction, 0.75);
   assert.equal(
     hit.b.vx,
     CAR_CONTACT.bumperImpulse * CAR_CONTACT.bumperFraction,
   );
-  assert.equal(hit.b.vx, 2.5);
+  assert.equal(hit.b.vx, 7.5);
   assert.equal(hit.a.vx, -hit.b.vx);
   assert.equal(hit.a.spin, -hit.b.spin);
   const gentle = carContact(pose(-2), pose(-1), pose(0), { x: 2, z: 0 });
-  assert.ok(gentle.b.vx >= 1 && gentle.b.vx <= 1.5);
+  assert.ok(Math.abs(gentle.b.vx - 1.1 * 3) < 1e-10);
   assert.ok(gentle.strength < hit.strength);
   for (const speed of [6, 8]) {
     const approaching = carContact(pose(-2), pose(-1), pose(0), {
       x: speed,
       z: 0,
     });
-    assert.ok(approaching.b.vx >= 2 && approaching.b.vx <= 3);
+    assert.ok(approaching.b.vx >= 6 && approaching.b.vx <= 9);
   }
   const movingPeer = carContact(
     pose(-2),
@@ -47,7 +47,7 @@ test("head-on and side impacts remain bounded and swept contacts cannot tunnel",
   assert.equal(hit.b.vx, CAR_CONTACT.maxImpulse);
   assert.equal(hit.a.vx, -CAR_CONTACT.maxImpulse);
   const side = carContact(pose(0, -2), pose(0, -1), pose(0), { x: 0, z: 8 });
-  assert.ok(side.b.vz >= 2 && side.b.vz <= 3);
+  assert.ok(side.b.vz >= 6 && side.b.vz <= 9);
   assert.ok(side.a.vz < 0 && side.b.vz > 0);
   assert.ok(Math.abs(side.a.spin) > 0.5);
 });

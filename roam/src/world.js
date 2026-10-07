@@ -721,6 +721,7 @@ export function createWorld(host, callbacks) {
     reducedMotion: reduced,
   });
   const nightLights = createNightLights(scene, car);
+  applyCarCosmetics(car, equipped, localColor);
   let boostUntil = 0;
   let raceBoostUntil = 0;
   let race = null;

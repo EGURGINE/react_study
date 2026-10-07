@@ -26,6 +26,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     [lapProgress, setLapProgress] = useState({ active: false, progress: 0 }),
     [gameBusy, setGameBusy] = useState(false);
   const pendingGames = useRef(new Map());
+  const attendanceRefresh = useRef({ pending: null, at: -Infinity });
   const clearGames = useCallback(() => {
     for (const request of pendingGames.current.values()) {
       clearTimeout(request.timer);
@@ -55,6 +56,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         setConnected(false);
         setPeers([]);
         setProfile(null);
+        attendanceRefresh.current = { pending: null, at: -Infinity };
         setLapProgress({ active: false, progress: 0 });
         setRaces([]);
         setRaceResult(null);
@@ -178,9 +180,14 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             if (request) {
               clearTimeout(request.timer);
               pendingGames.current.delete(data.requestId);
-              setGameBusy(pendingGames.current.size > 0);
+              setGameBusy(
+                [...pendingGames.current.values()].some(
+                  (pending) => !pending.quiet,
+                ),
+              );
               request.resolve(data);
-              if (!data.ok && data.message) notify(data.message);
+              if (!request.quiet && !data.ok && data.message)
+                notify(data.message);
             }
           }
           if (data.type === "race:state") setRaces(data.races || []);
@@ -391,13 +398,13 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     [notify],
   );
   const gameAction = useCallback(
-    (action, payload = {}) =>
+    (action, payload = {}, { quiet = false } = {}) =>
       new Promise((resolve) => {
         if (
           socket.current?.readyState !== WebSocket.OPEN ||
           !identity.current
         ) {
-          notify("닉네임으로 입장하면 함께 즐길 수 있어요.");
+          if (!quiet) notify("닉네임으로 입장하면 함께 즐길 수 있어요.");
           resolve({ ok: false, message: "닉네임으로 먼저 입장해 주세요." });
           return;
         }
@@ -405,20 +412,99 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         const timer = setTimeout(() => {
           if (!pendingGames.current.has(requestId)) return;
           pendingGames.current.delete(requestId);
-          setGameBusy(pendingGames.current.size > 0);
+          setGameBusy(
+            [...pendingGames.current.values()].some(
+              (pending) => !pending.quiet,
+            ),
+          );
           const message =
             "서버 응답이 늦어지고 있어요. 차고지 잔액을 확인해 주세요.";
-          notify(message);
+          if (!quiet) notify(message);
           resolve({ ok: false, message });
         }, 15000);
-        pendingGames.current.set(requestId, { resolve, timer });
-        setGameBusy(true);
+        pendingGames.current.set(requestId, { resolve, timer, quiet });
+        if (!quiet) setGameBusy(true);
         socket.current.send(
           JSON.stringify({ ...payload, type: "game", action, requestId }),
         );
       }),
     [notify],
   );
+  const refreshAttendance = useCallback(
+    (force = false) => {
+      if (!identity.current || socket.current?.readyState !== WebSocket.OPEN)
+        return Promise.resolve({
+          ok: false,
+          message: "온라인 입장 후 확인할 수 있어요.",
+        });
+      const refresh = attendanceRefresh.current;
+      if (refresh.pending) return refresh.pending;
+      if (!force && performance.now() - refresh.at < 15000)
+        return Promise.resolve({ ok: true });
+      refresh.at = performance.now();
+      refresh.pending = gameAction(
+        "attendance:status",
+        {},
+        { quiet: true },
+      ).finally(() => {
+        refresh.pending = null;
+      });
+      return refresh.pending;
+    },
+    [gameAction],
+  );
+  useEffect(() => {
+    if (!connected) return;
+    const onVisible = () => {
+      if (!document.hidden) void refreshAttendance();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [connected, refreshAttendance]);
+  useEffect(() => {
+    const attendance = profile?.attendance;
+    if (
+      !connected ||
+      !Number.isFinite(attendance?.nextClaimAt) ||
+      !Number.isFinite(attendance?.serverNow)
+    )
+      return;
+    // Use a server-relative duration so changing the PC clock cannot mark a
+    // reward available. The server still verifies the date on every claim.
+    const wait = Math.min(
+      86400000,
+      Math.max(1000, attendance.nextClaimAt - attendance.serverNow + 150),
+    );
+    let cancelled = false;
+    let retries = 0;
+    let timer;
+    const refreshAfterMidnight = async () => {
+      if (cancelled) return;
+      let succeeded = false;
+      try {
+        succeeded = Boolean((await refreshAttendance(true))?.ok);
+      } catch {
+        // A temporary transport failure should not strand yesterday's state.
+      }
+      if (cancelled || succeeded || retries >= 2) return;
+      retries += 1;
+      timer = setTimeout(refreshAfterMidnight, 15000);
+    };
+    timer = setTimeout(refreshAfterMidnight, wait);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    connected,
+    profile?.attendance?.nextClaimAt,
+    profile?.attendance?.serverNow,
+    refreshAttendance,
+  ]);
   const sprayNow = useCallback(() => gameAction("spray"), [gameAction]);
   useEffect(() => {
     mounted.current = true;
@@ -500,6 +586,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     lapProgress,
     gameBusy,
     gameAction,
+    refreshAttendance,
     sprayNow,
   };
 }

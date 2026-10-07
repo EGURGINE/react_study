@@ -143,6 +143,74 @@ async function travel(client, destination, target) {
   return approach(client, reply.player, target);
 }
 
+test("online attendance grants one private reward, rejects forged claims, and survives nickname reconnect", async (t) => {
+  const room = await fixture(t);
+  const driver = await room.connect();
+  const claim = (requestId, extra = {}) => ({
+    type: "game",
+    action: "attendance:claim",
+    requestId,
+    ...extra,
+  });
+  driver.send(claim("before-join"));
+  assert.equal(
+    (await driver.wait((m) => m.type === "error")).code,
+    "not_joined",
+  );
+  const welcome = await driver.join("출석 확인");
+  assert.equal(welcome.profile.attendance.available, true);
+  assert.equal(welcome.profile.attendance.claimedDays, 0);
+  const observer = await room.connect();
+  const other = await observer.join("옆자리");
+  assert.equal(
+    other.players.find((p) => p.id === welcome.player.id).attendance,
+    undefined,
+  );
+  driver.send(claim("forged-day", { day: 7, coins: 9999 }));
+  const forged = await driver.wait((m) => m.requestId === "forged-day");
+  assert.equal(forged.ok, false);
+  assert.equal(forged.code, "invalid_game");
+  driver.send(claim("daily-claim"));
+  driver.send(claim("parallel-claim"));
+  const paid = await driver.wait((m) => m.requestId === "daily-claim");
+  const duplicate = await driver.wait((m) => m.requestId === "parallel-claim");
+  assert.equal(paid.ok, true);
+  assert.equal(paid.item.type, "body");
+  assert.equal(paid.item.rarity, "mythic");
+  assert.equal(
+    paid.profile.inventory.length,
+    welcome.profile.inventory.length + 1,
+  );
+  assert.equal(paid.profile.coins, welcome.profile.coins);
+  assert.deepEqual(paid.profile.equipped, welcome.profile.equipped);
+  assert.equal(duplicate.code, "attendance_claimed");
+  assert.deepEqual(duplicate.profile.inventory, paid.profile.inventory);
+  assert.equal(duplicate.profile.attendance.claimedDays, 1);
+  driver.send({
+    type: "game",
+    action: "attendance:status",
+    requestId: "refresh-status",
+  });
+  const status = await driver.wait((m) => m.requestId === "refresh-status");
+  assert.equal(status.profile.attendance.claimedToday, true);
+  assert.equal(status.profile.attendance.available, false);
+  await driver.close();
+  const returning = await room.connect();
+  returning.send({
+    type: "join",
+    nickname: "바뀐 별명",
+    token: welcome.resumeToken,
+  });
+  const returned = await returning.wait((m) => m.type === "welcome");
+  assert.equal(returned.profile.attendance.claimedDays, 1);
+  returning.send(claim("daily-claim"));
+  const replay = await returning.wait((m) => m.requestId === "daily-claim");
+  assert.equal(replay.ok, true);
+  assert.equal(replay.item.id, paid.item.id);
+  assert.deepEqual(replay.profile.inventory, paid.profile.inventory);
+  assert.equal(replay.profile.attendance.claimedDays, 1);
+});
+
 test("accepted car contacts broadcast one shared impulse to both drivers; spoofed contacts cannot push cars", async (t) => {
   const room = await fixture(t);
   const driver = await room.connect(),
@@ -166,7 +234,7 @@ test("accepted car contacts broadcast one shared impulse to both drivers; spoofe
   assert.ok(impact.strength > 0.3);
   assert.equal(impact.participants[0].vx, -impact.participants[1].vx);
   const peerImpulse = impact.participants.find((p) => p.id === b.player.id).vx;
-  assert.ok(peerImpulse >= 1.1 && peerImpulse <= 4);
+  assert.ok(peerImpulse >= 3.3 && peerImpulse <= 12);
   driver.send({ type: "move", ...baseline, x: b.player.x - 1.1 });
   await assert.rejects(
     driver.wait((m) => m.type === "car:impact", 200),

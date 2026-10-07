@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { ITEM_BY_ID, STARTER_EQUIPPED, isDriveable } from "./gameConfig.js";
 import { BODY_STYLES } from "./cosmeticsCatalog.js";
-import { buildCarShell, CAR_WHEELS } from "./carModels.js";
+import { buildCarShell, CAR_WHEELS, CAR_LAMPS } from "./carModels.js";
 
 /** Independent shells share the world's wheel pivots and lamp emitters. */
 export function installCarBodies(carBody) {
@@ -60,8 +60,29 @@ export function applyCarCosmetics(
         object.userData.carWheel.axle * axle,
       );
       object.scale.set(width / 0.24, radius / 0.32, radius / 0.32);
+      // Reuse one front/rear pair at the centerline. Keeping the existing
+      // pivots preserves steering and wheel spin, and cloning stays cheap.
+      object.visible =
+        body.style !== "motorbike" || object.userData.carWheel.side < 0;
     }
   });
+  const emitters = model.getObjectByName("vehicle-night-emitters");
+  const [spread, frontY, frontZ, rearY, rearZ, width, height] =
+    CAR_LAMPS[body.style] || CAR_LAMPS.default;
+  for (const lamp of emitters?.children || []) {
+    lamp.userData.carLamp ??= {
+      side: Math.sign(lamp.position.x) || -1,
+      front: lamp.position.z > 0,
+    };
+    const { side, front } = lamp.userData.carLamp;
+    lamp.visible = body.style !== "motorbike" || side < 0;
+    lamp.position.set(
+      side * spread,
+      front ? frontY : rearY,
+      front ? frontZ : rearZ,
+    );
+    lamp.scale.set(width, height, 1);
+  }
   model.userData.cosmetics = selected;
 }
 
