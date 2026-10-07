@@ -1,7 +1,5 @@
 name: Deploy roam to GitHub Pages
 on:
-  push:
-    branches: [main, master, codex/roam-portfolio]
   workflow_dispatch:
 permissions:
   actions: read

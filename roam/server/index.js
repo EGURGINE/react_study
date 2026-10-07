@@ -4,6 +4,9 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { createGalleryStore, GalleryError } from "./gallery.js";
+import { createGameEngine } from "./game.js";
+import { isDriveable, trackPoint } from "../src/gameConfig.js";
+import { DUEL_MOVEMENT_LIMITS } from "../src/duelObstacles.js";
 
 const COLORS = [
   "#ef7861",
@@ -17,12 +20,11 @@ const COLORS = [
   "#a5b66d",
   "#8d96c6",
 ];
-const ISLAND_RADIUS = 21.3;
 const JOIN_TIMEOUT_MS = 15_000;
 const HEARTBEAT_MS = 15_000;
 const MAX_CONNECTIONS = 50;
 const MAX_MESSAGES_PER_SECOND = 90;
-const MAX_MOVEMENT_SPEED = 24;
+const MAX_MOVEMENT_SPEED = DUEL_MOVEMENT_LIMITS.maxSpeed;
 const MAX_MOVEMENT_BUDGET = 6;
 // Ordinary 80 ms updates keep only the six-unit collision/jitter reserve.
 // A missed group of updates may represent real travel, especially at boost
@@ -46,19 +48,21 @@ const CLIENT_OPERATIONS = new Set([
   "teleport",
   "interaction",
   "honk",
+  "game",
 ]);
 const DESTINATIONS = Object.freeze({
   start: Object.freeze({ x: 1.3, z: 7.8, heading: -Math.PI / 2.4 }),
   work: Object.freeze({ x: 1, z: -3.7, heading: Math.PI }),
   about: Object.freeze({ x: -8, z: 2.3, heading: Math.PI }),
   play: Object.freeze({ x: 8, z: 7.3, heading: Math.PI }),
+  track: Object.freeze(trackPoint(0)),
 });
 const INTERACTIONS = Object.freeze({
   "pop-1": Object.freeze({ x: -15, z: 4, r: 0.9, kind: "pop" }),
   "pop-2": Object.freeze({ x: -16, z: 6, r: 0.9, kind: "pop" }),
   "pop-3": Object.freeze({ x: -14, z: 7, r: 0.9, kind: "pop" }),
   "boost-1": Object.freeze({ x: 16, z: 0, r: 1.2, kind: "boost" }),
-  "boost-2": Object.freeze({ x: 0, z: 18, r: 1.2, kind: "boost" }),
+  "boost-2": Object.freeze({ x: 12, z: 13, r: 1.2, kind: "boost" }),
   "bumper-1": Object.freeze({ x: -8, z: 16, r: 1, kind: "bounce" }),
   "bumper-2": Object.freeze({ x: -11, z: 14, r: 1, kind: "bounce" }),
   "jump-1": Object.freeze({ x: 14, z: 11, r: 1.3, kind: "jump" }),
@@ -163,6 +167,8 @@ export function createGameServer({
     fileURLToPath(new URL("../data/gallery", import.meta.url)),
   galleryMaxBytes = Number(process.env.GALLERY_MAX_BYTES || 1024 * 1024 * 1024),
   galleryMaxItems = 50_000,
+  playersDirectory = process.env.PLAYERS_DIR ||
+    fileURLToPath(new URL("../data/players", import.meta.url)),
 } = {}) {
   if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 10) {
     throw new RangeError("maxPlayers must be an integer between 1 and 10");
@@ -181,6 +187,35 @@ export function createGameServer({
   const pendingPhotos = new Set();
   let activeImages = 0;
   let closing = false;
+  const game = createGameEngine({
+    directory: playersDirectory,
+    broadcast,
+    updateLap: (playerId, lap) => {
+      const session = players.get(playerId);
+      if (session && !closing)
+        send(session.socket, { type: "lap:progress", ...lap });
+    },
+    updateProfile: (playerId, profile) => {
+      const session = players.get(playerId);
+      if (!session || closing) return;
+      send(session.socket, { type: "profile", profile });
+      broadcastState();
+    },
+    teleport: (playerId, pose) => {
+      const session = players.get(playerId);
+      if (!session) return;
+      Object.assign(session.player, pose);
+      session.movementAt = performance.now();
+      session.forcedTeleportAt = session.movementAt;
+      session.movementBudget = MAX_MOVEMENT_BUDGET;
+      session.movementCatchupUntil = 0;
+      send(session.socket, {
+        type: "teleport",
+        player: publicPlayer(session.player),
+      });
+      broadcastState();
+    },
+  });
 
   const server = createServer(async (request, response) => {
     response.setHeader("Vary", "Origin");
@@ -274,7 +309,7 @@ export function createGameServer({
     maxPayload: MAX_WEBSOCKET_PAYLOAD_BYTES,
     perMessageDeflate: false,
   });
-  const publicPlayer = ({ id, nickname, color, x, y, z, heading }) => ({
+  const publicPlayer = ({
     id,
     nickname,
     color,
@@ -282,6 +317,16 @@ export function createGameServer({
     y,
     z,
     heading,
+    cosmetics,
+  }) => ({
+    id,
+    nickname,
+    color,
+    x,
+    y,
+    z,
+    heading,
+    cosmetics,
   });
   const publicPlayers = () =>
     [...players.values()].map(({ player }) => publicPlayer(player));
@@ -325,6 +370,13 @@ export function createGameServer({
     clearTimeout(session.joinTimeout);
     sessions.delete(socket);
     if (session.player) {
+      if (!closing) {
+        try {
+          game.detach(session.player.id);
+        } catch {
+          /* A durable escrow is recovered on restart after a disk failure. */
+        }
+      }
       players.delete(session.player.id);
       if (photos.delete(session.player.id) && !closing) {
         broadcast({
@@ -390,7 +442,7 @@ export function createGameServer({
     );
     const color = COLORS.find((candidate) => !usedColors.has(candidate));
     const slot = COLORS.indexOf(color);
-    session.player = {
+    const player = {
       id: randomUUID(),
       nickname,
       color,
@@ -399,6 +451,22 @@ export function createGameServer({
       z: DESTINATIONS.start.z + Math.floor(slot / 5) * 1.7,
       heading: DESTINATIONS.start.heading,
     };
+    let identity;
+    try {
+      identity = game.attach(player, data.token);
+    } catch (failure) {
+      const known = ["identity_in_use", "invalid_token"].includes(failure.code);
+      error(
+        session.socket,
+        known ? failure.code : "game_unavailable",
+        known
+          ? failure.message
+          : "게임 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.",
+        "join",
+      );
+      return;
+    }
+    session.player = player;
     session.nicknameKey = nicknameKey;
     session.movementAt = performance.now();
     session.movementBudget = MAX_MOVEMENT_BUDGET;
@@ -411,19 +479,23 @@ export function createGameServer({
       players: publicPlayers(),
       messages: [...messages],
       photos: [...photos.values()],
+      ...identity,
+      races: game.snapshotRaces(),
+      sprays: game.recentSprays(),
     });
     broadcastState();
   }
 
   function move(session, data, now) {
+    if (game.isLocked(session.player.id)) return;
     const { x, y = 0, z, heading } = data;
     if (
       ![x, y, z, heading].every(
         (value) => typeof value === "number" && Number.isFinite(value),
       ) ||
-      Math.hypot(x, z) > ISLAND_RADIUS ||
+      !isDriveable(x, z) ||
       y < 0 ||
-      y > 8
+      y > DUEL_MOVEMENT_LIMITS.maxHeight
     ) {
       error(
         session.socket,
@@ -433,6 +505,11 @@ export function createGameServer({
       );
       return;
     }
+    const distance = Math.hypot(x - session.player.x, z - session.player.z);
+    // A race finish restores both players immediately. Discard a briefly
+    // in-flight pose from the old course instead of flashing a correction.
+    if (now - session.forcedTeleportAt < 250 && distance > MAX_MOVEMENT_BUDGET)
+      return;
     const elapsed = Math.max(0, (now - session.movementAt) / 1000);
     if (now - session.movementAt > MOVEMENT_GAP_MS) {
       session.movementCatchupUntil = now + MOVEMENT_CATCHUP_MS;
@@ -444,7 +521,24 @@ export function createGameServer({
       session.movementBudget + elapsed * MAX_MOVEMENT_SPEED,
     );
     session.movementAt = now;
-    const distance = Math.hypot(x - session.player.x, z - session.player.z);
+    const steps = Math.ceil(distance / 0.5);
+    for (let step = 1; step < steps; step += 1) {
+      if (
+        !isDriveable(
+          session.player.x + ((x - session.player.x) * step) / steps,
+          session.player.z + ((z - session.player.z) * step) / steps,
+        )
+      ) {
+        error(
+          session.socket,
+          "invalid_move",
+          "길 안에서 움직여 주세요. 마지막 위치로 돌아갑니다.",
+          "move",
+        );
+        game.resetLap(session.player.id);
+        return;
+      }
+    }
     if (distance > session.movementBudget + 0.001) {
       error(
         session.socket,
@@ -461,6 +555,16 @@ export function createGameServer({
       z,
       heading: Math.atan2(Math.sin(heading), Math.cos(heading)),
     });
+    try {
+      game.onMove(session.player.id, session.player);
+    } catch {
+      error(
+        session.socket,
+        "game_unavailable",
+        "랩 기록을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        "game",
+      );
+    }
   }
 
   function chat(session, data, now) {
@@ -513,6 +617,15 @@ export function createGameServer({
   }
 
   function teleport(session, data, now) {
+    if (!game.beforeTeleport(session.player.id)) {
+      error(
+        session.socket,
+        "race_active",
+        "대결 중에는 이동할 수 없어요. 먼저 대결에서 나가 주세요.",
+        "teleport",
+      );
+      return;
+    }
     if (
       typeof data.destination !== "string" ||
       !Object.hasOwn(DESTINATIONS, data.destination)
@@ -535,6 +648,7 @@ export function createGameServer({
       return;
     }
     session.lastTeleportAt = now;
+    game.resetLap(session.player.id);
     session.movementAt = now;
     session.movementBudget = MAX_MOVEMENT_BUDGET;
     session.movementCatchupUntil = 0;
@@ -546,7 +660,7 @@ export function createGameServer({
   function interaction(session, data, now) {
     if (
       typeof data.objectId !== "string" ||
-      !Object.hasOwn(INTERACTIONS, data.objectId) ||
+      data.objectId.length > 128 ||
       Object.keys(data).some((key) => key !== "type" && key !== "objectId")
     ) {
       error(
@@ -555,6 +669,12 @@ export function createGameServer({
         "Choose an interactive object on the island.",
         "interaction",
       );
+      return;
+    }
+    if (!Object.hasOwn(INTERACTIONS, data.objectId)) {
+      const result = game.interact(session.player.id, data.objectId);
+      if (!result.ok)
+        error(session.socket, result.code, result.message, "interaction");
       return;
     }
     const object = INTERACTIONS[data.objectId];
@@ -686,6 +806,7 @@ export function createGameServer({
       windowAt: performance.now(),
       windowMessages: 0,
       movementAt: 0,
+      forcedTeleportAt: -Infinity,
       movementBudget: 0,
       movementCatchupUntil: 0,
       lastChatAt: -Infinity,
@@ -794,6 +915,8 @@ export function createGameServer({
         pendingPhotos.add(pending);
         pending.finally(() => pendingPhotos.delete(pending));
       } else if (data.type === "interaction") interaction(session, data, now);
+      else if (data.type === "game")
+        send(socket, game.handle(session.player.id, data));
       else if (data.type === "honk") {
         if (now - session.lastHonkAt < 1000) {
           error(
@@ -838,6 +961,14 @@ export function createGameServer({
 
   const stateTimer = setInterval(broadcastState, 1000 / 15);
   stateTimer.unref();
+  const gameTimer = setInterval(() => {
+    try {
+      game.tick();
+    } catch {
+      /* Escrow remains durable if the disk is temporarily unavailable. */
+    }
+  }, 100);
+  gameTimer.unref();
   const heartbeatTimer = setInterval(() => {
     for (const [socket, session] of sessions) {
       if (!session.alive) {
@@ -855,7 +986,13 @@ export function createGameServer({
     if (closing) return;
     closing = true;
     clearInterval(stateTimer);
+    clearInterval(gameTimer);
     clearInterval(heartbeatTimer);
+    try {
+      game.shutdown();
+    } catch {
+      /* Unresolved, durable escrows are refunded at the next startup. */
+    }
     for (const [socket, session] of sessions) {
       clearTimeout(session.joinTimeout);
       socket.terminate();

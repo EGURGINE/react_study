@@ -1,0 +1,339 @@
+/* The world supplies a continuously interpolated palette. Photos and canvas
+   retain their own colors; only the interface follows the island's time. */
+.social-app[data-time-of-day] {
+  --ui-soft: var(--ui-panel);
+  --ui-card: var(--ui-panel);
+  --line: var(--ui-border);
+  background-color: var(--sky-color);
+  color: var(--ui-ink);
+}
+.social-app[data-time-of-day] .world-gradient {
+  background: var(--sky-color);
+}
+.social-app[data-time-of-day] :is(.header, footer) {
+  border-color: var(--ui-border);
+}
+.social-app[data-time-of-day]
+  :is(
+    .wordmark,
+    .header nav button,
+    .sound-button,
+    .intro h1,
+    .modal h2,
+    .modal h3,
+    .map-destination,
+    .gallery-caption strong,
+    .chat-header strong,
+    .chat-message p
+  ) {
+  color: var(--ui-ink);
+}
+.social-app[data-time-of-day]
+  :is(
+    .wordmark > span,
+    .intro h1 em,
+    .chat-spark,
+    .chat-welcome,
+    .crate-copy h3,
+    .rail-invite > svg,
+    .rail-status > svg
+  ) {
+  color: var(--ui-accent);
+}
+.social-app[data-time-of-day]
+  :is(
+    .wordmark i,
+    .intro > p,
+    .intro-note,
+    .eyebrow,
+    .modal-eyebrow,
+    .modal-intro,
+    footer,
+    .map-heading,
+    .map-caption,
+    .compass,
+    .form-label,
+    .solo-button,
+    .chat-empty,
+    .chat-people,
+    .chat-header > div > span,
+    .chat-message time,
+    .gallery-heading,
+    .gallery-caption time,
+    .gallery-toolbar > span,
+    .gallery-car-note,
+    .photo-lightbox-footer,
+    .photo-note,
+    .gallery-loading,
+    .self-label,
+    .world-label .label-number,
+    .world-label svg,
+    .game-footnote,
+    .crate-duplicate-note,
+    .crate-copy > small,
+    .crate-copy p,
+    .crate-odds,
+    .collection-heading > span,
+    .item-rarity,
+    .rail-status small,
+    .rail-invite small,
+    .race-section-label,
+    .race-pot,
+    .race-room span,
+    .race-empty span,
+    .race-hud small,
+    .race-hud-caption
+  ) {
+  color: var(--ui-muted);
+}
+.social-app[data-time-of-day]
+  :is(
+    .modal,
+    .chat-panel,
+    .map-card,
+    .room-status,
+    .world-label,
+    .social-controls,
+    .race-hud,
+    .rail-status,
+    .graphics-error
+  ) {
+  color: var(--ui-ink);
+  background: var(--ui-panel);
+  border-color: var(--ui-border);
+  transition:
+    background-color 2s ease,
+    border-color 2s ease;
+}
+.social-app[data-time-of-day] .modal::backdrop {
+  background: color-mix(in srgb, var(--sky-color, #53694e) 42%, transparent);
+}
+.social-app[data-time-of-day] :is(.world-label:hover, .world-label.near) {
+  background: var(--ui-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 20%, transparent);
+}
+.social-app[data-time-of-day] :is(.peer-label, .car-photo) {
+  background: var(--ui-panel);
+  color: var(--ui-ink);
+}
+.social-app[data-time-of-day] .car-photo {
+  border-color: var(--ui-border);
+}
+.social-app[data-time-of-day] .car-photo > span {
+  color: var(--ui-ink);
+}
+.social-app[data-time-of-day]
+  :is(
+    .chat-header,
+    .chat-people,
+    .chat-form,
+    .gallery-heading,
+    .inventory-tabs,
+    .race-rooms,
+    .race-room,
+    .help-rows p,
+    .gallery-car-note,
+    .world-label .label-number,
+    .wordmark i
+  ) {
+  border-color: var(--ui-border);
+}
+.social-app[data-time-of-day] :is(.chat-form input, .nickname-input) {
+  background: var(--ui-card);
+  border-color: var(--ui-border);
+  color: var(--ui-ink);
+}
+.social-app[data-time-of-day]
+  :is(.chat-form input, .nickname-input)::placeholder {
+  color: var(--ui-muted);
+}
+.social-app[data-time-of-day]
+  :is(.primary-button, .chat-form > button:last-child, .chat-toggle.active) {
+  color: var(--ui-on-accent);
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+.social-app[data-time-of-day]
+  :is(.gallery-card, .photo-empty, .inventory-item, .crate-result) {
+  color: var(--ui-ink);
+  background: var(--ui-card);
+}
+.social-app[data-time-of-day] .inventory-item {
+  border-right-color: var(--ui-border);
+  border-bottom-color: var(--ui-border);
+  border-left-color: var(--ui-border);
+}
+.social-app[data-time-of-day]
+  :is(
+    .chat-toggle,
+    .upload-fab,
+    .mobile-spray,
+    .wave-button,
+    .touch-controls button,
+    .interaction-prompt button,
+    .chat-welcome > button,
+    .game-join-note,
+    .crate-section,
+    .rail-invite,
+    .active-race,
+    .inventory-item.locked,
+    .inventory-tabs button[aria-pressed="true"],
+    .stake-options button[aria-pressed="true"],
+    .gallery-more,
+    .fun-spots button,
+    .help-photo
+  ) {
+  background: var(--ui-soft);
+  color: var(--ui-ink);
+  border-color: var(--ui-border);
+}
+.social-app[data-time-of-day]
+  :is(
+    .bare-icon,
+    .modal-close,
+    .social-controls button,
+    .chat-photo-button,
+    .chat-people button,
+    .remove-photo,
+    .gallery-heading button,
+    .game-join-note button,
+    .earn-coins-link,
+    .item-equip,
+    .inventory-tabs button,
+    .race-cancel
+  ) {
+  color: var(--ui-accent);
+}
+.social-app[data-time-of-day]
+  :is(
+    kbd,
+    .stake-options button,
+    .inventory-item > button,
+    .race-room button,
+    .rail-invite-icon
+  ) {
+  background: var(--ui-soft);
+  color: var(--ui-accent);
+  border-color: var(--ui-border);
+}
+.social-app[data-time-of-day] .inventory-item.equipped > button {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+.social-app[data-time-of-day] :is(.game-wallet, .garage-wallet) {
+  background: var(--ui-panel);
+  border-color: color-mix(in srgb, var(--ui-border) 72%, #d4b568);
+  color: var(--ui-ink);
+}
+.social-app[data-time-of-day]
+  :is(
+    .garage-wallet small,
+    .crate-odds strong,
+    .crate-result small,
+    .crate-result p,
+    .active-race p,
+    .active-race > small,
+    .race-empty,
+    .race-hud > button,
+    .race-hud > button > span
+  ) {
+  color: var(--ui-muted);
+}
+.social-app[data-time-of-day]
+  :is(.race-pot strong, .active-race p b, .race-hud.counting > strong) {
+  color: var(--ui-accent);
+}
+.social-app[data-time-of-day] .toast {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+.social-app[data-time-of-day] .chat-toggle.active {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+}
+.social-app[data-time-of-day] :is(.full-photo, .join-symbol) {
+  background: var(--ui-soft);
+}
+.social-app[data-time-of-day]
+  :is(.help-photo strong, .join-symbol, .gallery-error button) {
+  color: var(--ui-accent);
+}
+.social-app[data-time-of-day] .gallery-error {
+  color: var(--ui-muted);
+}
+.social-app[data-time-of-day] :is(.form-error, .game-error) {
+  color: var(--ui-danger);
+}
+.social-app[data-time-of-day] .game-error {
+  background: var(--ui-panel);
+}
+.social-app[data-time-of-day] .race-flow {
+  border-color: var(--ui-border);
+}
+.social-app[data-time-of-day] :is(.race-flow li > span, .race-flow small) {
+  color: var(--ui-muted);
+}
+.social-app[data-time-of-day] .daytime-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.social-app[data-time-of-day]
+  :is(.wordmark, .header nav button, .sound-button, .intro h1) {
+  color: var(--ui-scene-ink);
+}
+.social-app[data-time-of-day]
+  :is(
+    .wordmark i,
+    .intro > p,
+    .intro-note,
+    .eyebrow,
+    footer,
+    .compass,
+    .daytime-indicator
+  ) {
+  color: var(--ui-scene-muted);
+}
+.social-app[data-time-of-day]
+  :is(.wordmark > span, .intro h1 em, .daytime-indicator > svg) {
+  color: var(--ui-scene-accent);
+}
+.daytime-indicator > svg {
+  color: var(--ui-accent);
+}
+.daytime-indicator > small {
+  font-size: 9px;
+  margin-left: 7px;
+}
+@media (max-width: 760px) {
+  .social-app[data-time-of-day] .daytime-indicator {
+    gap: 5px;
+    font-size: 9px;
+  }
+  .daytime-indicator > small {
+    display: none;
+  }
+  .daytime-indicator > svg {
+    width: 12px;
+    height: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .social-app[data-time-of-day]
+    :is(
+      .modal,
+      .chat-panel,
+      .map-card,
+      .room-status,
+      .world-label,
+      .social-controls,
+      .race-hud,
+      .rail-status,
+      .graphics-error
+    ) {
+    transition: none;
+  }
+}

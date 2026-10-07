@@ -1,6 +1,27 @@
 import * as THREE from "three";
-import { findPath } from "./navigation.js";
+import { findWorldPath } from "./railNavigation.js";
 import { createAttractions } from "./attractions.js";
+import { createRailWorld } from "./railWorld.js";
+import { createDuelWorld } from "./duelWorld.js";
+import { DUEL_OBSTACLE_RULES } from "./duelObstacles.js";
+import { createNightLights } from "./nightLights.js";
+import { createBloom } from "./bloom.js";
+import { getLightingState } from "./dayCycle.js";
+import {
+  installCarBodies,
+  applyCarCosmetics,
+  createCosmeticsEffects,
+} from "./cosmeticsWorld.js";
+import {
+  STARTER_EQUIPPED,
+  TRACK,
+  trackPoint,
+  projectTrack,
+  isDriveable,
+  DUEL_TRACK,
+  projectDuel,
+  recoveryHeading,
+} from "./gameConfig.js";
 
 export const ZONES = [
   {
@@ -13,8 +34,8 @@ export const ZONES = [
   },
   {
     id: "about",
-    title: "작은 쉼터",
-    subtitle: "아무 이야기나 좋아요",
+    title: "차고지",
+    subtitle: "내 차를 꾸미는 공간",
     x: -8,
     z: -1,
     color: "#dba68b",
@@ -22,7 +43,7 @@ export const ZONES = [
   {
     id: "play",
     title: "같이 놀자",
-    subtitle: "가벼운 딴짓도 좋아요",
+    subtitle: "레일 위의 한 판 승부",
     x: 8,
     z: 4,
     color: "#b7ba90",
@@ -37,7 +58,7 @@ export function createWorld(host, callbacks) {
     alpha: true,
     powerPreference: "high-performance",
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.7));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -51,6 +72,15 @@ export function createWorld(host, callbacks) {
     "우리들의 아지트. 우클릭으로 이동하거나 WASD와 방향키로 운전하세요.",
   );
   const camera = new THREE.OrthographicCamera(-25, 25, 15, -15, 0.1, 160);
+  const postProcessing = createBloom(renderer, scene, camera);
+  const openedAt = performance.now();
+  // Local-only links let the lighting be reviewed without a five-minute wait.
+  const previewTime = import.meta.env.DEV
+    ? { day: 0, sunset: 150, night: 300, dawn: 450 }[
+        new URLSearchParams(window.location.search).get("time")
+      ]
+    : undefined;
+  let lighting = getLightingState(previewTime ?? 0);
   const target = new THREE.Vector3(-3.4, 0, 0);
   const cameraOffset = new THREE.Vector3(24, 29, 32);
   const materials = new Map();
@@ -151,24 +181,26 @@ export function createWorld(host, callbacks) {
     p.receiveShadow = false;
     return p;
   }
-  scene.add(new THREE.AmbientLight(0xfff5e3, 1.4));
+  const ambient = new THREE.AmbientLight(0xfff5e3, 1.4);
+  scene.add(ambient);
   const sun = new THREE.DirectionalLight(0xfff7dc, 3.2);
   sun.position.set(-15, 28, 12);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, {
-    left: -24,
-    right: 24,
-    top: 24,
-    bottom: -24,
+    left: -56,
+    right: 56,
+    top: 56,
+    bottom: -56,
     near: 0.5,
-    far: 80,
+    far: 160,
   });
   sun.shadow.normalBias = 0.03;
   sun.shadow.bias = -0.0001;
   sun.shadow.radius = 5;
   scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0xc8e8ec, 0xc8a678, 1.1));
+  const hemisphere = new THREE.HemisphereLight(0xc8e8ec, 0xc8a678, 1.1);
+  scene.add(hemisphere);
 
   // Everything is real geometry: a little model you can drive around.
   cylinder(22.2, 21.6, 1.3, "#d6c39c", scene, 0, -0.82, 0, 96);
@@ -503,6 +535,7 @@ export function createWorld(host, callbacks) {
 
   const car = group(START.x, 0, START.z, START.heading);
   const carBody = new THREE.Group();
+  carBody.name = "car-body";
   car.add(carBody);
   box(1.13, 0.28, 1.9, "#91ae80", carBody, 0, 0.49, 0);
   box(1.05, 0.27, 0.72, "#abc692", carBody, 0, 0.7, 0.56);
@@ -566,6 +599,11 @@ export function createWorld(host, callbacks) {
     1.86,
     -0.44,
   );
+  installCarBodies(carBody);
+  const carVisual = new THREE.Group();
+  carVisual.name = "car-visual";
+  for (const child of [...car.children]) carVisual.add(child);
+  car.add(carVisual);
   const dust = [];
   const dustGeo = new THREE.IcosahedronGeometry(0.14, 0);
   for (let i = 0; i < 20; i++) {
@@ -577,19 +615,23 @@ export function createWorld(host, callbacks) {
     m.visible = false;
     dust.push({ m, life: 0 });
   }
-  const bodyMeshes = [];
   car.traverse((o) => {
     if (
       o.isMesh &&
-      ["91ae80", "abc692", "aac98c", "bfd1a2", "cfdbac"].includes(
-        o.material.color?.getHexString(),
-      )
+      (o.userData.isBody ||
+        ["91ae80", "abc692", "aac98c", "bfd1a2", "cfdbac"].includes(
+          o.material.color?.getHexString(),
+        ))
     ) {
+      if (!o.userData.isBody) o.material = o.material.clone();
       o.userData.isBody = true;
-      o.material = o.material.clone();
-      bodyMeshes.push(o);
     }
   });
+  let localId = null;
+  let localColor = "#a5bf90";
+  let equipped = { ...STARTER_EQUIPPED };
+  applyCarCosmetics(car, equipped, localColor);
+  const cosmeticEffects = createCosmeticsEffects(scene);
   const remoteCars = new Map();
   function updatePeers(peers) {
     const ids = new Set(peers.map((p) => p.id));
@@ -615,10 +657,16 @@ export function createWorld(host, callbacks) {
           }
         });
         model.position.set(peer.x, 0, peer.z);
+        model.getObjectByName("car-visual").position.y = 0;
         scene.add(model);
         p = { model, ownedMaterials, ...peer };
         remoteCars.set(peer.id, p);
       } else Object.assign(p, peer);
+      const cosmeticsKey = JSON.stringify(peer.cosmetics || STARTER_EQUIPPED);
+      if (p.cosmeticsKey !== cosmeticsKey) {
+        applyCarCosmetics(p.model, peer.cosmetics, peer.color);
+        p.cosmeticsKey = cosmeticsKey;
+      }
     }
   }
   const keys = new Set();
@@ -637,7 +685,12 @@ export function createWorld(host, callbacks) {
     jump = 0,
     jumpVelocity = 0;
   const attractions = createAttractions(scene);
+  const railway = createRailWorld(scene);
+  const duelWorld = createDuelWorld(scene);
+  const nightLights = createNightLights(scene, car);
   let boostUntil = 0;
+  let race = null;
+  let recovering = 0;
   let waypoints = [];
   const destinationMarker = mesh(
     new THREE.RingGeometry(0.24, 0.36, 40),
@@ -675,17 +728,26 @@ export function createWorld(host, callbacks) {
     raycaster.setFromCamera(pointer, camera);
     if (
       !raycaster.ray.intersectPlane(ground, hit) ||
-      Math.hypot(hit.x, hit.z) > 22.5
+      (!isDriveable(hit.x, hit.z) &&
+        !(Math.abs(hit.x) <= 22 && hit.z >= 24 && hit.z <= 43))
     )
       return;
     driveTo({ x: hit.x, z: hit.z });
   }
   function driveTo(destination) {
-    const path = findPath(
+    if (
+      Math.hypot(
+        destination.x - car.position.x,
+        destination.z - car.position.z,
+      ) < 0.2
+    ) {
+      cancelNavigation();
+      return;
+    }
+    const path = findWorldPath(
       { x: car.position.x, z: car.position.z },
       destination,
       colliders,
-      { radius: 21.2, clearance: 0.82, step: 0.55 },
     );
     if (!path.length) {
       cancelNavigation();
@@ -725,8 +787,9 @@ export function createWorld(host, callbacks) {
     width = host.clientWidth;
     height = host.clientHeight;
     renderer.setSize(width, height);
+    postProcessing.resize(width, height);
     const aspect = width / height;
-    const size = (aspect < 1.2 ? 58 / aspect : 36) * zoom;
+    const size = (aspect < 1.2 ? 48 / aspect : 36) * zoom;
     camera.left = (-size * aspect) / 2;
     camera.right = (size * aspect) / 2;
     camera.top = size / 2;
@@ -735,7 +798,7 @@ export function createWorld(host, callbacks) {
   }
   function wheelZoom(e) {
     e.preventDefault();
-    zoom = THREE.MathUtils.clamp(zoom + e.deltaY * 0.0007, 0.65, 1.4);
+    zoom = THREE.MathUtils.clamp(zoom + e.deltaY * 0.0007, 0.55, 2.1);
     resize();
   }
   renderer.domElement.addEventListener("wheel", wheelZoom, { passive: false });
@@ -777,6 +840,7 @@ export function createWorld(host, callbacks) {
       "ShiftRight",
       "KeyR",
       "KeyE",
+      "KeyT",
       "Enter",
     ];
     if (accepted.includes(e.code)) {
@@ -785,6 +849,7 @@ export function createWorld(host, callbacks) {
     }
     if (e.repeat) return;
     if (e.code === "KeyR") reset();
+    if (e.code === "KeyT") callbacks.onSpray?.();
     if ((e.code === "KeyE" || e.code === "Enter") && near)
       callbacks.onInteract(near);
   }
@@ -804,6 +869,7 @@ export function createWorld(host, callbacks) {
     jump = 0;
     jumpVelocity = 0;
     boostUntil = 0;
+    recovering = 0;
     clearInput();
   }
   function soundOn(enabled) {
@@ -842,7 +908,37 @@ export function createWorld(host, callbacks) {
     const dt = Math.min((time - prev) / 1000 || 0.016, 0.04);
     prev = time;
     elapsed += dt;
-    const active = !paused && !document.hidden;
+    lighting = getLightingState(
+      previewTime ?? (performance.now() - openedAt) / 1000,
+    );
+    ambient.color.set(lighting.ambientColor);
+    ambient.intensity = lighting.ambientIntensity;
+    hemisphere.color.set(lighting.hemisphereSky);
+    hemisphere.groundColor.set(lighting.hemisphereGround);
+    hemisphere.intensity = lighting.hemiIntensity;
+    sun.color.set(lighting.sunColor);
+    sun.intensity = lighting.sunIntensity;
+    sun.position.set(
+      -15 + lighting.night * 10,
+      28 - Math.sin(lighting.night * Math.PI) * 16,
+      12,
+    );
+    renderer.toneMappingExposure = lighting.exposure;
+    postProcessing.setStrength(lighting.bloomStrength);
+    attractions.setNight(lighting.night);
+    railway.setNight(lighting.night);
+    duelWorld.setNight(lighting.night);
+    recovering = Math.max(0, recovering - dt);
+    const raceParticipant =
+      race && localId && (race.hostId === localId || race.guestId === localId);
+    const countdownLocked = Boolean(
+      raceParticipant &&
+        race.status === "countdown" &&
+        Date.now() < race.startsAt,
+    );
+    const active =
+      !paused && !document.hidden && !countdownLocked && recovering === 0;
+    if (countdownLocked) speed = 0;
     let throttle = active
       ? (keys.has("ArrowUp") || keys.has("KeyW") ? 1 : 0) -
           (keys.has("ArrowDown") || keys.has("KeyS") ? 1 : 0) || mobile.throttle
@@ -856,6 +952,7 @@ export function createWorld(host, callbacks) {
       active &&
       (keys.has("ShiftLeft") || keys.has("ShiftRight") || elapsed < boostUntil);
     if (active) {
+      const previousPosition = { x: car.position.x, z: car.position.z };
       if (throttle || steer || brake) cancelNavigation();
       let autopilot = waypoints.length > 0;
       if (autopilot) {
@@ -864,7 +961,7 @@ export function createWorld(host, callbacks) {
             goal.x - car.position.x,
             goal.z - car.position.z,
           );
-        if (distance < 0.32) {
+        if (distance < (waypoints.length === 1 ? 0.04 : 0.32)) {
           waypoints.shift();
           if (!waypoints.length) {
             cancelNavigation();
@@ -904,16 +1001,14 @@ export function createWorld(host, callbacks) {
         );
         speed = THREE.MathUtils.clamp(speed, -5, boost ? 13 : 6.8);
         if (Math.abs(speed) < 0.015) speed = 0;
-        heading += steer * speed * 0.72 * dt;
+        const onRail =
+          projectDuel(car.position.x, car.position.z).inside ||
+          projectTrack(car.position.x, car.position.z).distance <=
+            TRACK.halfWidth;
+        heading += steer * speed * (onRail ? 0.22 : 0.72) * dt;
       }
       car.position.x += Math.sin(heading) * speed * dt;
       car.position.z += Math.cos(heading) * speed * dt;
-      const length = Math.hypot(car.position.x, car.position.z);
-      if (length > 21.2) {
-        car.position.x *= 21.2 / length;
-        car.position.z *= 21.2 / length;
-        speed *= -0.22;
-      }
       for (const c of colliders) {
         const dx = car.position.x - c.x,
           dz = car.position.z - c.z,
@@ -943,10 +1038,34 @@ export function createWorld(host, callbacks) {
           speed *= 0.93;
         }
       }
-      const edge = Math.hypot(car.position.x, car.position.z);
-      if (edge > 21.2) {
-        car.position.x *= 21.2 / edge;
-        car.position.z *= 21.2 / edge;
+      if (!isDriveable(car.position.x, car.position.z)) {
+        // Return to the last valid point, at most one frame away. A brief
+        // visual dip signals recovery without sending an invalid/teleport pose.
+        car.position.x = previousPosition.x;
+        car.position.z = previousPosition.z;
+        heading = recoveryHeading(
+          car.position.x,
+          car.position.z,
+          Math.sign(speed),
+        );
+        speed = 0;
+        jump = 0;
+        jumpVelocity = 0;
+        boostUntil = 0;
+        recovering = 0.65;
+        cancelNavigation();
+        callbacks.onRecovery?.();
+      }
+      const railBumper =
+        jump < 0.4 ? railway.hitBumper(car.position, speed, elapsed) : null;
+      if (railBumper) {
+        railway.playBumper(railBumper.id, elapsed);
+        cancelNavigation();
+        const towardRail = car.position.z < 28.5 ? 0 : Math.PI / 2;
+        heading = towardRail + (Math.random() - 0.5) * 1.05;
+        speed = 4 + Math.random() * 3;
+        jumpVelocity = 2.2 + Math.random() * 1.3;
+        boostUntil = elapsed + 0.25;
       }
       const attraction =
         jump < 0.45
@@ -963,7 +1082,6 @@ export function createWorld(host, callbacks) {
           kind: attraction.kind,
         });
         if (attraction.kind === "boost") {
-          cancelNavigation();
           speed = speed < 0 ? -13 : 13;
           boostUntil = elapsed + 2.5;
         }
@@ -985,6 +1103,37 @@ export function createWorld(host, callbacks) {
           jumpVelocity = 3.5;
         }
       }
+      const duelObstacle = duelWorld.hit(
+        { x: car.position.x, y: jump, z: car.position.z },
+        speed,
+        elapsed,
+      );
+      if (duelObstacle) {
+        duelWorld.play(duelObstacle.id, elapsed);
+        callbacks.onInteraction?.({
+          objectId: duelObstacle.id,
+          kind: duelObstacle.kind,
+        });
+        const rules = DUEL_OBSTACLE_RULES[duelObstacle.kind];
+        jumpVelocity = rules.jumpVelocity;
+        if (duelObstacle.kind === "bounce") {
+          cancelNavigation();
+          const laneCenter =
+            DUEL_TRACK.cx +
+            (duelObstacle.lane === 0
+              ? -DUEL_TRACK.laneOffset
+              : DUEL_TRACK.laneOffset);
+          const offset = car.position.x - laneCenter;
+          const direction =
+            Math.abs(offset) > 0.6
+              ? -Math.sign(offset)
+              : Math.sign(car.position.x - duelObstacle.x) ||
+                (duelObstacle.lane === 0 ? -1 : 1);
+          heading = Math.PI - direction * 0.45;
+          speed = rules.speed;
+          boostUntil = elapsed + 0.45;
+        }
+      }
       const onTrampoline =
         Math.hypot(car.position.x - 8.1, car.position.z - 4) < 1.1;
       if (onTrampoline && jump === 0) jumpVelocity = 5;
@@ -1003,11 +1152,16 @@ export function createWorld(host, callbacks) {
       }
     } else speed *= Math.exp(-8 * dt);
     attractions.update(dt, elapsed);
+    railway.update(dt, elapsed);
+    duelWorld.update(dt, elapsed);
     destinationMarker.scale.setScalar(
       reduced ? 1 : 1 + Math.sin(elapsed * 4) * 0.12,
     );
     car.position.y = jump;
     car.rotation.y = heading;
+    carVisual.position.y =
+      recovering > 0 ? -Math.sin((1 - recovering / 0.65) * Math.PI) * 1.05 : 0;
+    cosmeticEffects.trail(car, speed, dt, elapsed);
     carBody.rotation.z = THREE.MathUtils.lerp(
       carBody.rotation.z,
       steer * speed * 0.015,
@@ -1039,8 +1193,17 @@ export function createWorld(host, callbacks) {
     });
     const aspect = width / height;
     const tx = aspect < 0.8 ? -1 : -5.5;
+    const railFocus = THREE.MathUtils.smoothstep(car.position.z, 11, 27);
+    const onDuel = projectDuel(car.position.x, car.position.z).inside;
     target.lerp(
-      new THREE.Vector3(tx + car.position.x * 0.22, 0, car.position.z * 0.2),
+      onDuel
+        ? new THREE.Vector3(DUEL_TRACK.cx, 0, car.position.z - 3)
+        : new THREE.Vector3(
+            tx * (1 - railFocus * 0.65) +
+              car.position.x * (0.22 + railFocus * 0.5),
+            0,
+            car.position.z * (0.2 + railFocus * 0.63),
+          ),
       1 - Math.exp(-2 * dt),
     );
     camera.position.copy(target).add(cameraOffset);
@@ -1059,17 +1222,28 @@ export function createWorld(host, callbacks) {
       );
     }
     for (const p of remoteCars.values()) {
+      const previousX = p.model.position.x,
+        previousZ = p.model.position.z;
+      const teleported = Math.hypot(p.x - previousX, p.z - previousZ) > 10;
       p.model.position.lerp(
         new THREE.Vector3(p.x, p.y || 0, p.z),
-        1 - Math.exp(-13 * dt),
+        teleported ? 1 : 1 - Math.exp(-13 * dt),
       );
       const delta = Math.atan2(
         Math.sin(p.heading - p.model.rotation.y),
         Math.cos(p.heading - p.model.rotation.y),
       );
       p.model.rotation.y += delta * (1 - Math.exp(-13 * dt));
+      const remoteSpeed =
+        Math.hypot(
+          p.model.position.x - previousX,
+          p.model.position.z - previousZ,
+        ) / Math.max(dt, 0.001);
+      if (!teleported) cosmeticEffects.trail(p.model, remoteSpeed, dt, elapsed);
     }
-    renderer.render(scene, camera);
+    cosmeticEffects.update(dt, elapsed);
+    nightLights.update(lighting.night, elapsed);
+    postProcessing.render(dt);
     near =
       ZONES.find(
         (zone) =>
@@ -1085,6 +1259,14 @@ export function createWorld(host, callbacks) {
       driveTime,
       boost: elapsed < boostUntil,
       navigating: waypoints.length > 0,
+      track: {
+        progress: projectTrack(car.position.x, car.position.z).progress,
+        onTrack:
+          projectTrack(car.position.x, car.position.z).distance <=
+          TRACK.halfWidth,
+      },
+      raceLocked: countdownLocked,
+      lighting,
       labels: ZONES.map((zone) => ({
         ...zone,
         ...project(zone.x, 3.9, zone.z),
@@ -1121,45 +1303,91 @@ export function createWorld(host, callbacks) {
     },
     setSound: soundOn,
     setPeers: updatePeers,
+    setCosmetics(value) {
+      applyCarCosmetics(car, value, localColor);
+      equipped = { ...car.userData.cosmetics };
+    },
+    applySpray(event) {
+      return cosmeticEffects.spray(event, elapsed);
+    },
+    setRace(value) {
+      race = value || null;
+      duelWorld.setRace(race, localId);
+      if (
+        race?.status === "countdown" &&
+        (race.hostId === localId || race.guestId === localId)
+      ) {
+        cancelNavigation();
+        clearInput();
+        speed = 0;
+      }
+    },
     driveTo,
     applyInteraction(event) {
+      if (event.raceId) {
+        duelWorld.play(event.objectId, elapsed, true, event.raceId);
+        return;
+      }
       attractions.play(event.objectId, elapsed, true);
     },
     setIdentity(player) {
       if (player) {
+        localId = player.id;
+        localColor = player.color;
         cancelNavigation();
         car.position.set(player.x, 0, player.z);
         jump = 0;
         jumpVelocity = 0;
         boostUntil = 0;
+        recovering = 0;
         heading = player.heading;
         speed = 0;
-        bodyMeshes.forEach((o) =>
-          o.material.color
-            .set(player.color)
-            .lerp(new THREE.Color("#ffffff"), 0.16),
-        );
-      } else bodyMeshes.forEach((o) => o.material.color.set("#a5bf90"));
+        applyCarCosmetics(car, player.cosmetics || equipped, localColor);
+        equipped = { ...car.userData.cosmetics };
+      } else {
+        localId = null;
+        localColor = "#a5bf90";
+        applyCarCosmetics(car, equipped, localColor);
+      }
+      duelWorld.setRace(race, localId);
     },
     setPosition(player) {
+      const changedCourse =
+        projectDuel(car.position.x, car.position.z).inside !==
+        projectDuel(player.x, player.z).inside;
       cancelNavigation();
       jump = player.y || 0;
       jumpVelocity = 0;
       boostUntil = 0;
+      recovering = 0;
       car.position.set(player.x, jump, player.z);
       heading = player.heading;
       speed = 0;
       clearInput();
+      if (changedCourse) {
+        target.set(
+          projectDuel(player.x, player.z).inside ? DUEL_TRACK.cx : player.x - 3,
+          0,
+          projectDuel(player.x, player.z).inside
+            ? player.z - 3
+            : player.z * 0.6,
+        );
+      }
     },
     goTo(id) {
       cancelNavigation();
       const zone = ZONES.find((z) => z.id === id);
-      if (!zone) return;
-      car.position.set(zone.x, 0, zone.z + 3.3);
+      if (!zone && id !== "track") return;
+      const destination =
+        id === "track"
+          ? trackPoint(0)
+          : { x: zone.x, z: zone.z + 3.3, heading: Math.PI };
+      car.position.set(destination.x, 0, destination.z);
       jump = 0;
       jumpVelocity = 0;
       boostUntil = 0;
-      heading = Math.PI;
+      recovering = 0;
+      heading = destination.heading;
       speed = 0;
     },
     dispose() {
@@ -1173,6 +1401,9 @@ export function createWorld(host, callbacks) {
       window.removeEventListener("blur", stopInput);
       document.removeEventListener("visibilitychange", stopInput);
       audioContext?.close();
+      cosmeticEffects.dispose();
+      nightLights.dispose();
+      postProcessing.dispose();
       const textures = new Set(),
         geometries = new Set(),
         mats = new Set();

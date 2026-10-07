@@ -29,10 +29,12 @@ async function fixture(t, options = {}) {
   const galleryDirectory =
     options.galleryDirectory ??
     (await mkdtemp(join(tmpdir(), "roam-gallery-test-")));
+  const playersDirectory = await mkdtemp(join(tmpdir(), "roam-players-test-"));
   const server = createGameServer({
     allowedOrigins: [ORIGIN],
     ...options,
     galleryDirectory,
+    playersDirectory,
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -48,6 +50,7 @@ async function fixture(t, options = {}) {
   };
   t.after(async () => {
     await close();
+    await rm(playersDirectory, { recursive: true, force: true });
     if (!options.galleryDirectory)
       await rm(galleryDirectory, { recursive: true, force: true });
   });
@@ -727,6 +730,31 @@ test("interactions reject unknown IDs, extra properties, and distant triggers", 
   );
 });
 
+test("duel interactions require a current race and reject client-supplied authority fields", async (t) => {
+  const room = await fixture(t);
+  const client = await room.connect();
+  await client.join("대결 관전자");
+  client.send({ type: "interaction", objectId: "duel-other-race-0-0" });
+  const rejected = await client.wait((message) => message.type === "error");
+  assert.equal(rejected.code, "race_unavailable");
+  assert.equal(rejected.operation, "interaction");
+  for (const extra of [
+    { raceId: "other-race" },
+    { kind: "jump" },
+    { x: -31, z: 7 },
+    { playerId: "another-player" },
+  ]) {
+    client.send({
+      type: "interaction",
+      objectId: "duel-other-race-0-0",
+      ...extra,
+    });
+    const forged = await client.wait((message) => message.type === "error");
+    assert.equal(forged.code, "invalid_interaction");
+    assert.equal(forged.operation, "interaction");
+  }
+});
+
 test("all fixed interactions broadcast their server-defined kind and acting player", async (t) => {
   const room = await fixture(t);
   const viewer = await room.connect();
@@ -736,7 +764,7 @@ test("all fixed interactions broadcast their server-defined kind and acting play
     ["pop-2", "pop", "about", -16, 6],
     ["pop-3", "pop", "about", -14, 7],
     ["boost-1", "boost", "play", 16, 0],
-    ["boost-2", "boost", "start", 0, 18],
+    ["boost-2", "boost", "start", 12, 13],
     ["bumper-1", "bounce", "start", -8, 16],
     ["bumper-2", "bounce", "about", -11, 14],
     ["jump-1", "jump", "play", 14, 11],
@@ -924,6 +952,7 @@ test("invalid movement returns only the last acknowledged public player pose", a
     assert.deepEqual(rejected.player, acknowledged);
     assert.deepEqual(Object.keys(rejected.player).sort(), [
       "color",
+      "cosmetics",
       "heading",
       "id",
       "nickname",

@@ -6,7 +6,7 @@ export const ATTRACTIONS = Object.freeze(
     { id: "pop-2", x: -16, z: 6, r: 0.9, kind: "pop" },
     { id: "pop-3", x: -14, z: 7, r: 0.9, kind: "pop" },
     { id: "boost-1", x: 16, z: 0, r: 1.2, kind: "boost" },
-    { id: "boost-2", x: 0, z: 18, r: 1.2, kind: "boost" },
+    { id: "boost-2", x: 12, z: 13, r: 1.2, kind: "boost" },
     { id: "bumper-1", x: -8, z: 16, r: 1, kind: "bounce" },
     { id: "bumper-2", x: -11, z: 14, r: 1, kind: "bounce" },
     { id: "jump-1", x: 14, z: 11, r: 1.3, kind: "jump" },
@@ -44,6 +44,7 @@ export function createAttractions(scene) {
   const flameMeshes = [];
   const smoke = [];
   const bulbs = [];
+  let night = 0;
   const root = new THREE.Group();
   root.name = "social-island-attractions";
   scene.add(root);
@@ -382,6 +383,7 @@ export function createAttractions(scene) {
     flameMeshes.push({ mesh: flame, y, phase: index * 2.3 });
   });
   const fireLight = new THREE.PointLight("#ffc578", 1.3, 5, 2);
+  fireLight.castShadow = false;
   fireLight.position.set(0, 1.1, 0.55);
   camp.add(fireLight);
   const smokeMaterial = material("#e8e2cb", {
@@ -616,13 +618,15 @@ export function createAttractions(scene) {
           age >= 0 && age < 1 ? Math.sin(age * 18) * Math.exp(-age * 4.4) : 0;
         record.moving.position.y = 0.63 + springAmount * 0.3;
         record.surface.emissiveIntensity =
-          0.035 + Math.max(0, 1 - age / 0.65) * 0.65;
+          0.035 + night * 0.8 + Math.max(0, 1 - age / 0.65) * (0.65 + night);
       } else {
         record.surface.emissiveIntensity =
           0.065 +
+          night * 0.75 +
           Math.sin(elapsed * 2.5) * 0.035 +
-          Math.max(0, 1 - age / 0.7) * 0.75;
+          Math.max(0, 1 - age / 0.7) * (0.75 + night);
       }
+      record.flash.material.emissiveIntensity = 0.2 + night * 2;
       if (age >= 0 && age < 0.65) {
         record.flash.visible = true;
         record.flash.scale.setScalar(1 + age * 1.8);
@@ -663,8 +667,10 @@ export function createAttractions(scene) {
       flame.mesh.position.y = flame.y + flicker * 0.14;
       flame.mesh.rotation.y = elapsed * 0.17 + flame.phase;
       flame.mesh.rotation.z = Math.sin(elapsed * 4 + flame.phase) * 0.055;
+      flame.mesh.material.emissiveIntensity = 0.38 + night * (3.1 + flicker);
     }
-    fireLight.intensity = 1.2 + Math.sin(elapsed * 8.1) * 0.14;
+    fireLight.intensity =
+      1.2 + night * 5.2 + Math.sin(elapsed * 8.1) * (0.14 + night * 0.2);
     for (const puff of smoke) {
       const progress = (elapsed * 0.24 + puff.phase) % 1;
       puff.mesh.position.set(
@@ -679,8 +685,15 @@ export function createAttractions(scene) {
     }
     for (const bulb of bulbs)
       bulb.mesh.material.emissiveIntensity =
-        0.5 + Math.sin(elapsed * 1.2 + bulb.phase) * 0.1;
+        0.5 + night * 3.4 + Math.sin(elapsed * 1.2 + bulb.phase) * 0.1;
   }
 
-  return { hit, play, update };
+  return {
+    hit,
+    play,
+    update,
+    setNight(value) {
+      night = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 0;
+    },
+  };
 }

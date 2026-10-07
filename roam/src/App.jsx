@@ -28,11 +28,21 @@ import {
   MousePointer2,
   Camera,
   Trash2,
+  Paintbrush,
+  Flag,
+  Sun,
+  Moon,
+  Sunrise,
+  Sunset,
 } from "lucide-react";
 import { createWorld, ZONES } from "./world.js";
 import { useMultiplayer } from "./multiplayer.js";
 import { preparePhoto } from "./photos.js";
 import { useGallery } from "./gallery.js";
+import { GaragePanel, RacePanel, RaceHud, Wallet } from "./GamePanels.jsx";
+import { LAP_REWARD } from "./gameConfig.js";
+import "./game.css";
+import "./lighting.css";
 
 const photoDate = (value) =>
   new Intl.DateTimeFormat("ko-KR", {
@@ -99,7 +109,7 @@ function Modal({ section, onClose, children }) {
   return (
     <dialog
       ref={ref}
-      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""}`}
+      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""} ${section === "about" || section === "play" ? "game-modal" : ""}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -128,7 +138,40 @@ function Modal({ section, onClose, children }) {
 function MiniMap({ state, onSelect, large = false, peers = [] }) {
   return (
     <div className={`minimap ${large ? "large-map" : ""}`}>
-      <svg viewBox="0 0 200 150" aria-label="우리 아지트 지도와 자동차 위치">
+      <svg
+        viewBox="-30 0 230 190"
+        aria-label="우리 아지트와 아래 순환 레일, 왼쪽 직선 대결 코스 지도, 자동차 위치"
+      >
+        <rect x="-21" y="7" width="28" height="124" rx="5" fill="#879b97" />
+        <path
+          d="M-7 17V123"
+          stroke="#e5eddb"
+          strokeWidth="1"
+          strokeDasharray="4 4"
+        />
+        <path d="M-21 120H7" stroke="#f5edc4" strokeWidth="3" />
+        <path d="M-21 15H7" stroke="#f8f8ed" strokeWidth="5" />
+        <path
+          d="M-18 15H4"
+          stroke="#435b53"
+          strokeWidth="5"
+          strokeDasharray="3 3"
+        />
+        <path d="M100 120V149" fill="none" stroke="#e0d8bf" strokeWidth="15" />
+        <path
+          d="M58.6 147.5H141.4A17.25 12.5 0 0 1 141.4 172.5H58.6A17.25 12.5 0 0 1 58.6 147.5Z"
+          fill="none"
+          stroke="#b3b99d"
+          strokeWidth="12"
+        />
+        <path
+          d="M58.6 147.5H141.4A17.25 12.5 0 0 1 141.4 172.5H58.6A17.25 12.5 0 0 1 58.6 147.5Z"
+          fill="none"
+          stroke="#f3f3df"
+          strokeWidth="1"
+          strokeDasharray="3 5"
+        />
+        <path d="M100 142V153" stroke="#667f52" strokeWidth="2" />
         <ellipse cx="100" cy="75" rx="82" ry="60" fill="#e8dfc8" />
         <ellipse
           cx="100"
@@ -251,18 +294,30 @@ export default function App() {
   const [photoView, setPhotoView] = useState(null),
     [preparing, setPreparing] = useState(false);
   const chatEnd = useRef(null),
-    toastTimer = useRef();
+    toastTimer = useRef(),
+    railAfterJoin = useRef(false);
   const notify = useCallback((text) => {
     setToast(text);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 4000);
   }, []);
-  const open = useCallback((id) => setSection(id), []);
+  const open = useCallback(
+    (id) => setSection(id === "track" ? "play" : id),
+    [],
+  );
   const receiveInteraction = useCallback(
     (event) => world.current?.applyInteraction(event),
     [],
   );
-  const multiplayer = useMultiplayer(stateRef, notify, receiveInteraction);
+  const receiveGameEvent = useCallback((event) => {
+    if (event.type === "spray") world.current?.applySpray(event.spray);
+  }, []);
+  const multiplayer = useMultiplayer(
+    stateRef,
+    notify,
+    receiveInteraction,
+    receiveGameEvent,
+  );
   const gallery = useGallery(
     section === "work" || (section === "photo" && photoView?.archived),
     multiplayer.galleryVersion,
@@ -292,6 +347,7 @@ export default function App() {
         onNavigationError: () =>
           notify("길이 막혀 있어요. 조금 옆을 찍어 주세요."),
         onInteraction: (event) => multiplayer.emitInteraction(event),
+        onSpray: () => multiplayer.sprayNow(),
       });
       setReady(true);
     } catch (e) {
@@ -318,6 +374,35 @@ export default function App() {
   useEffect(() => {
     world.current?.setIdentity(multiplayer.player);
   }, [multiplayer.player]);
+  useEffect(() => {
+    world.current?.setCosmetics(multiplayer.profile?.equipped);
+  }, [multiplayer.profile?.equipped]);
+  useEffect(() => {
+    world.current?.setRace(multiplayer.currentRace);
+    if (
+      multiplayer.currentRace?.status === "countdown" ||
+      multiplayer.currentRace?.status === "racing"
+    )
+      setSection(null);
+  }, [multiplayer.currentRace?.id, multiplayer.currentRace?.status]);
+  useEffect(() => {
+    const result = multiplayer.raceResult;
+    if (!result) return;
+    if (!result.winnerId)
+      notify("대결이 종료되었어요. 판돈은 참가자에게 돌아가요.");
+    else if (result.winnerId === multiplayer.player?.id)
+      notify(
+        `${result.reason === "forfeit" ? "상대의 기권으로 승리했어요!" : "결승선에 먼저 도착했어요!"} ${result.pot}코인을 받고 아지트로 돌아가요. 🏁`,
+      );
+    else
+      notify(
+        `${result.winnerNickname}님이 승리했어요. 아지트로 돌아가 다음 대결을 준비해요!`,
+      );
+  }, [multiplayer.raceResult]);
+  useEffect(() => {
+    if (multiplayer.latestLap)
+      notify(`한 바퀴 완주! +${LAP_REWARD}코인을 모았어요. 🪙`);
+  }, [multiplayer.latestLap]);
   useEffect(() => {
     if (multiplayer.correction)
       world.current?.setPosition(multiplayer.correction);
@@ -350,7 +435,10 @@ export default function App() {
   }, [ready]);
 
   const close = () => {
-    if (section === "join") multiplayer.cancelJoin();
+    if (section === "join") {
+      multiplayer.cancelJoin();
+      railAfterJoin.current = false;
+    }
     if (section === "photo" && photoView?.archived) {
       setSection("work");
       return;
@@ -362,6 +450,10 @@ export default function App() {
     if (await multiplayer.join(nickname)) {
       setSection(null);
       setChatOpen(true);
+      if (railAfterJoin.current) {
+        railAfterJoin.current = false;
+        multiplayer.teleport("track");
+      }
     }
   }
   async function send(e) {
@@ -375,9 +467,17 @@ export default function App() {
     world.current?.reset();
   }
   function visit(id) {
+    const destination = id;
+    if (destination === "track" && !multiplayer.connected) {
+      railAfterJoin.current = true;
+      open("join");
+      notify("코인은 닉네임으로 입장한 뒤부터 모을 수 있어요.");
+      return;
+    }
     const spot = FUN_SPOTS.find((s) => s.id === id);
     if (spot) world.current?.driveTo(spot);
-    else if (!multiplayer.teleport(id)) world.current?.goTo(id);
+    else if (!multiplayer.teleport(destination))
+      world.current?.goTo(destination);
     setSection(null);
   }
   function choosePhoto() {
@@ -415,6 +515,25 @@ export default function App() {
     multiplayer.player && multiplayer.photos[multiplayer.player.id];
   const nearZone = ZONES.find((z) => z.id === state.near);
   const photoBusy = preparing || multiplayer.uploading;
+  const lighting = state.lighting;
+  const lightingPhase = lighting?.phase || "day";
+  const TimeIcon =
+    { day: Sun, sunset: Sunset, night: Moon, dawn: Sunrise }[lightingPhase] ||
+    Sun;
+  const lightingStyle = {
+    "--night": lighting?.night || 0,
+    "--sky-color": lighting?.skyColor || "#eeede4",
+    "--ui-panel": lighting?.ui?.panel || "#f7f7ef",
+    "--ui-ink": lighting?.ui?.ink || "#3c523d",
+    "--ui-muted": lighting?.ui?.muted || "#89917c",
+    "--ui-border": lighting?.ui?.border || "#dfe5d3",
+    "--ui-accent": lighting?.ui?.accent || "#3d6043",
+    "--ui-on-accent": lighting?.ui?.onAccent || "#ffffff",
+    "--ui-scene-ink": lighting?.ui?.sceneInk || "#354839",
+    "--ui-scene-muted": lighting?.ui?.sceneMuted || "#67735f",
+    "--ui-scene-accent": lighting?.ui?.sceneAccent || "#3d6043",
+    "--ui-danger": lighting?.ui?.danger || "#a6644e",
+  };
   const photoCards = [
     ...multiplayer.peers
       .filter((p) => multiplayer.photos[p.id])
@@ -432,7 +551,11 @@ export default function App() {
   ];
 
   return (
-    <main className="app social-app">
+    <main
+      className="app social-app"
+      data-time-of-day={lightingPhase}
+      style={lightingStyle}
+    >
       <div className="world-gradient" />
       <div ref={canvasRef} className="world-canvas" />
       <input
@@ -474,7 +597,10 @@ export default function App() {
           </button>
         </nav>
         <div className="header-right">
-          <span className="availability">잠깐 들러도 좋아요</span>
+          <Wallet
+            coins={multiplayer.profile?.coins || 0}
+            onClick={() => open("about")}
+          />
           <button
             className="icon-button sound-button"
             onClick={() => {
@@ -487,6 +613,40 @@ export default function App() {
           </button>
         </div>
       </header>
+      <RaceHud race={multiplayer.currentRace} onOpen={() => open("play")} />
+      {!multiplayer.currentRace && (
+        <button
+          className={`rail-status ${moved ? "has-moved" : ""} ${state.track?.onTrack ? "on-track" : ""}`}
+          onClick={() =>
+            !multiplayer.connected || !state.track?.onTrack
+              ? visit("track")
+              : open("play")
+          }
+        >
+          <Flag size={16} />
+          <span>
+            <strong>
+              {state.track?.onTrack && multiplayer.connected
+                ? `완주 진행 ${Math.round(multiplayer.lapProgress.progress * 100)}%`
+                : "레일 한 바퀴 달리기"}
+            </strong>
+            <small>
+              {multiplayer.connected
+                ? `한 바퀴 완주 · +${LAP_REWARD}코인`
+                : "닉네임 입장 후 코인 적립"}
+            </small>
+          </span>
+          {state.track?.onTrack && multiplayer.connected && (
+            <span
+              className="rail-status-progress"
+              aria-hidden="true"
+              style={{
+                "--progress": `${Math.round(multiplayer.lapProgress.progress * 100)}%`,
+              }}
+            />
+          )}
+        </button>
+      )}
       <section
         className={`intro ${moved ? "has-moved" : ""}`}
         aria-label="우리들의 아지트"
@@ -742,6 +902,15 @@ export default function App() {
           <kbd>W A S D</kbd>직접 운전
         </span>
         <button
+          className="spray-control"
+          onClick={() =>
+            multiplayer.player ? multiplayer.sprayNow() : open("join")
+          }
+          aria-label="장착한 스프레이 뿌리기"
+        >
+          <kbd>T</kbd> 스프레이
+        </button>
+        <button
           onClick={() => {
             reset();
             notify("처음 만났던 자리로 돌아가요.");
@@ -814,9 +983,26 @@ export default function App() {
       >
         <ImagePlus size={20} />
       </button>
+      <button
+        className="mobile-spray"
+        onClick={() =>
+          multiplayer.player ? multiplayer.sprayNow() : open("join")
+        }
+        aria-label="장착한 스프레이 뿌리기"
+      >
+        <Paintbrush size={19} />
+      </button>
       <footer>
         <span>roam. · 우리들의 작은 아지트</span>
-        <span className="footer-center">어디로 가든, 함께라면.</span>
+        <span
+          className="daytime-indicator"
+          title="5분에 걸쳐 밤으로, 다음 5분에 걸쳐 다시 낮으로 변해요. 한 주기는 10분이에요."
+          aria-label={`아지트의 시간: ${lighting?.label || "낮"}. 낮과 밤은 10분 주기로 변해요.`}
+        >
+          <TimeIcon size={14} strokeWidth={1.6} />
+          <span>{lighting?.label || "낮"}</span>
+          <small>천천히 흐르는 아지트의 시간</small>
+        </span>
         <span>
           가볍게 들러요 <span>✳</span>
         </span>
@@ -1031,91 +1217,23 @@ export default function App() {
           </>
         )}
         {section === "about" && (
-          <>
-            <div className="modal-eyebrow">02 / A PLACE TO STAY</div>
-            <h2 id="modal-title">
-              아무 얘기나,
-              <br />
-              천천히 해요.
-            </h2>
-            <p className="modal-intro">
-              특별한 이유가 없어도 괜찮아요.
-              <br />
-              좋아하는 사진 한 장과 오늘의 이야기를 가져오세요.
-            </p>
-            <div className="hangout-tips">
-              <p>
-                <MessageCircle size={20} />
-                <span>
-                  <strong>안녕, 처음 만나요.</strong>수다창에서 모두와 이야기를
-                  나눠요.
-                </span>
-              </p>
-              <p>
-                <Camera size={20} />
-                <span>
-                  <strong>사진이 대화의 시작이 돼요.</strong>자동차 위의 사진을
-                  누르면 크게 볼 수 있어요.
-                </span>
-              </p>
-              <p>
-                <Hand size={20} />
-                <span>
-                  <strong>반가운 마음을 전해요.</strong>손 모양 버튼으로
-                  모두에게 인사를 건네요.
-                </span>
-              </p>
-            </div>
-            <button
-              className="primary-button"
-              onClick={() => {
-                close();
-                setChatOpen(true);
-              }}
-            >
-              수다 나누러 가기
-            </button>
-          </>
+          <GaragePanel
+            multiplayer={multiplayer}
+            onJoin={() => open("join")}
+            onTrack={() => visit("track")}
+          />
         )}
         {section === "play" && (
-          <>
-            <div className="modal-eyebrow">03 / A HAPPY DETOUR</div>
-            <h2 id="modal-title">
-              가끔은,
-              <br />
-              딴짓도 좋아요.
-            </h2>
-            <p className="modal-intro">
-              친구가 올 때까지 한 바퀴 돌거나, 같이 콩콩 뛰어봐요.
-            </p>
-            <div className="play-options">
-              <button onClick={() => visit("play")}>
-                <span className="play-icon">
-                  <ArrowUp />
-                </span>
-                <div>
-                  <h3>트램펄린에서 콩콩</h3>
-                  <p>동그란 트램펄린 위로 차를 몰아보세요.</p>
-                </div>
-                <Plus size={20} />
-              </button>
-              <button
-                onClick={() => {
-                  reset();
-                  close();
-                }}
-              >
-                <span className="play-icon">
-                  <Compass />
-                </span>
-                <div>
-                  <h3>아지트 한 바퀴</h3>
-                  <p>우클릭으로 목적지를 찍거나, Shift를 누르고 달려요.</p>
-                </div>
-                <Plus size={20} />
-              </button>
-            </div>
-          </>
+          <RacePanel
+            multiplayer={multiplayer}
+            onJoin={() => open("join")}
+            onTrack={() =>
+              multiplayer.currentRace &&
+              multiplayer.currentRace.status !== "waiting"
+                ? close()
+                : visit("track")
+            }
+          />
         )}
         {section === "map" && (
           <>
@@ -1170,6 +1288,10 @@ export default function App() {
                 <kbd>E</kbd>
               </p>
               <p>
+                <span>장착한 스프레이 남기기</span>
+                <kbd>T</kbd>
+              </p>
+              <p>
                 <span>시작 위치로 돌아가기</span>
                 <kbd>R</kbd>
               </p>
@@ -1180,6 +1302,16 @@ export default function App() {
                 <strong>사진 올리기</strong>로 내 차 위에 사진을 띄워요.
                 <br />
                 다른 사람의 사진을 누르면 크게 볼 수 있어요.
+              </p>
+            </div>
+            <div className="help-photo">
+              <Flag size={21} />
+              <p>
+                맵 아래 레일을 한 바퀴 돌면 <strong>{LAP_REWARD}코인</strong>을
+                받아요.
+                <br />
+                차고지에서 100코인으로 상자를 열어요. 같이 놀자에서 대결이
+                성사되면 왼쪽 직선 코스로 자동 이동해요.
               </p>
             </div>
             <p className="modal-intro">
