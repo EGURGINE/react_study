@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   ArrowUp,
   ArrowDown,
@@ -26,6 +32,14 @@ import {
 import { createWorld, ZONES } from "./world.js";
 import { useMultiplayer } from "./multiplayer.js";
 import { preparePhoto } from "./photos.js";
+import { useGallery } from "./gallery.js";
+
+const photoDate = (value) =>
+  new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(new Date(value));
 
 const FUN_SPOTS = [
   {
@@ -67,6 +81,17 @@ const FUN_SPOTS = [
 
 function Modal({ section, onClose, children }) {
   const ref = useRef();
+  const galleryScroll = useRef(0);
+  const previousSection = useRef(null);
+  useLayoutEffect(() => {
+    if (section === "work") {
+      ref.current.scrollTop =
+        previousSection.current === "photo" ? galleryScroll.current : 0;
+    } else if (section === "photo") {
+      ref.current.scrollTop = 0;
+    }
+    previousSection.current = section;
+  }, [section]);
   useEffect(() => {
     if (section) ref.current.showModal();
     else ref.current.close();
@@ -74,12 +99,19 @@ function Modal({ section, onClose, children }) {
   return (
     <dialog
       ref={ref}
-      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""}`}
-      onCancel={onClose}
+      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""}`}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
       onClick={(e) => {
         if (e.target === ref.current) onClose();
       }}
       aria-labelledby="modal-title"
+      onScroll={(event) => {
+        if (section === "work")
+          galleryScroll.current = event.currentTarget.scrollTop;
+      }}
     >
       <button
         className="icon-button modal-close"
@@ -231,6 +263,10 @@ export default function App() {
     [],
   );
   const multiplayer = useMultiplayer(stateRef, notify, receiveInteraction);
+  const gallery = useGallery(
+    section === "work" || (section === "photo" && photoView?.archived),
+    multiplayer.galleryVersion,
+  );
 
   useEffect(() => {
     try {
@@ -301,6 +337,7 @@ export default function App() {
     if (
       section === "photo" &&
       photoView &&
+      !photoView.archived &&
       !multiplayer.photos[photoView.playerId]
     )
       setSection(null);
@@ -314,6 +351,10 @@ export default function App() {
 
   const close = () => {
     if (section === "join") multiplayer.cancelJoin();
+    if (section === "photo" && photoView?.archived) {
+      setSection("work");
+      return;
+    }
     setSection(null);
   };
   async function join(e) {
@@ -355,8 +396,10 @@ export default function App() {
     try {
       const src = await preparePhoto(file);
       if (await multiplayer.sharePhoto(src)) {
-        close();
-        notify("사진이 자동차 위에 올라갔어요. 친구들도 볼 수 있어요!");
+        setSection((current) =>
+          current === section && current !== "work" ? null : current,
+        );
+        notify("사진을 갤러리에 남겼어요. 자동차 위에서도 보여요!");
       }
     } catch (e) {
       notify(e.message || "이 사진을 열 수 없어요. 다른 사진을 선택해 주세요.");
@@ -870,60 +913,121 @@ export default function App() {
         )}
         {section === "work" && (
           <>
-            <div className="modal-eyebrow">01 / PHOTO SPOT</div>
+            <div className="modal-eyebrow">
+              <Camera size={15} /> 01 / OUR PHOTO ALBUM
+            </div>
             <h2 id="modal-title">
               오늘의 한 장,
               <br />
-              같이 볼래요?
+              우리의 사진첩.
             </h2>
             <p className="modal-intro">
               좋아하는 풍경, 귀여운 고양이, 오늘 먹은 점심.
               <br />
-              사진을 올리면 내 자동차 위에 함께 떠요.
+              함께 올린 순간들은 아지트를 나가도 여기 남아요.
             </p>
-            {ownPhoto ? (
-              <button
-                className="my-photo-preview"
-                onClick={() => showPhoto(ownPhoto)}
-              >
-                <img src={ownPhoto.src} alt="내가 공유 중인 사진" />
-              </button>
-            ) : (
-              <div className="photo-empty">
-                <Camera size={43} strokeWidth={1} />
-                <span>어떤 순간을 나누고 싶나요?</span>
-              </div>
-            )}
-            <div className="photo-actions">
+            <div className="gallery-toolbar">
               <button
                 className="primary-button"
                 onClick={choosePhoto}
                 disabled={photoBusy}
               >
                 <ImagePlus size={17} />
-                {photoBusy
-                  ? "사진 올리는 중…"
-                  : ownPhoto
-                    ? "다른 사진 올리기"
-                    : "사진 올리기"}
+                {photoBusy ? "사진 올리는 중…" : "사진 남기기"}
               </button>
-              {ownPhoto && (
-                <button
-                  className="remove-photo"
-                  disabled={photoBusy}
-                  onClick={() => multiplayer.sharePhoto(null)}
-                >
-                  <Trash2 size={16} />
-                  사진 내리기
-                </button>
-              )}
+              <span>JPG · PNG · WebP / 최대 12MB</span>
             </div>
-            <p className="photo-note">
-              JPG · PNG · WebP, 최대 12MB
-              <br />
-              사진은 함께 접속한 사람들에게만 보여요. 아지트를 나가면
-              내려갑니다.
-            </p>
+            <div className="gallery-heading">
+              <span>함께 모은 순간들</span>
+              <div>
+                <small>최신순</small>
+                {gallery.configured && (
+                  <button
+                    onClick={gallery.refresh}
+                    disabled={gallery.loading}
+                    aria-label="사진첩 새로고침"
+                  >
+                    <RotateCcw size={13} /> 새로고침
+                  </button>
+                )}
+              </div>
+            </div>
+            {gallery.items.length > 0 && (
+              <ul className="gallery-grid" aria-label="함께 올린 사진 목록">
+                {gallery.items.map((photo) => (
+                  <li key={photo.id}>
+                    <button
+                      className="gallery-card"
+                      onClick={() => showPhoto({ ...photo, archived: true })}
+                      aria-label={`${photo.nickname}님의 ${photoDate(photo.createdAt)} 사진 크게 보기`}
+                    >
+                      <img
+                        src={photo.src}
+                        alt={`${photo.nickname}님이 남긴 사진`}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                      <span className="gallery-caption">
+                        <strong>{photo.nickname}</strong>
+                        <time dateTime={photo.createdAt}>
+                          {photoDate(photo.createdAt)}
+                        </time>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!gallery.items.length && !gallery.loading && !gallery.error && (
+              <div className="photo-empty gallery-empty">
+                <Camera size={37} strokeWidth={1} />
+                <span>우리의 첫 번째 사진을 기다리고 있어요.</span>
+                <small>오늘의 순간 하나를 남겨 주세요.</small>
+              </div>
+            )}
+            {gallery.error && (
+              <div className="gallery-error" role="alert">
+                <p>{gallery.error}</p>
+                {gallery.configured && (
+                  <button onClick={gallery.refresh}>다시 불러오기</button>
+                )}
+              </div>
+            )}
+            {gallery.loading && (
+              <p className="gallery-loading" role="status">
+                사진을 불러오고 있어요…
+              </p>
+            )}
+            {gallery.nextCursor && (
+              <button
+                className="gallery-more"
+                onClick={gallery.loadMore}
+                disabled={gallery.loading}
+              >
+                이전 사진 더 보기 <ArrowDown size={14} />
+              </button>
+            )}
+            <div className="gallery-car-note">
+              {ownPhoto && (
+                <>
+                  <button
+                    className="gallery-current"
+                    onClick={() => showPhoto(ownPhoto)}
+                    aria-label="내 차 위 사진 크게 보기"
+                  >
+                    <img src={ownPhoto.src} alt="내 차 위에 띄운 사진" />
+                  </button>
+                  <button
+                    className="remove-photo"
+                    disabled={photoBusy}
+                    onClick={() => multiplayer.sharePhoto(null)}
+                  >
+                    <Trash2 size={14} /> 차에서 내리기
+                  </button>
+                </>
+              )}
+              <p>차 위에서는 내려도, 사진첩에는 그대로 남아요.</p>
+            </div>
           </>
         )}
         {section === "about" && (
@@ -1099,18 +1203,29 @@ export default function App() {
               alt={`${photoView.nickname}님이 공유한 사진`}
             />
             <div className="photo-lightbox-footer">
-              <span>이 순간을 함께 보고 있어요.</span>
-              {photoView.playerId === multiplayer.player?.id && (
-                <button
-                  className="remove-photo"
-                  onClick={async () => {
-                    if (await multiplayer.sharePhoto(null)) close();
-                  }}
-                >
-                  <Trash2 size={15} />
-                  사진 내리기
+              <span>
+                {photoView.archived
+                  ? photoDate(photoView.createdAt)
+                  : "차에서 내려도 사진첩에는 남아요."}
+              </span>
+              {photoView.archived && (
+                <button className="remove-photo" onClick={() => open("work")}>
+                  <ArrowLeft size={15} /> 사진첩으로
                 </button>
               )}
+              {!photoView.archived &&
+                multiplayer.player &&
+                photoView.playerId === multiplayer.player.id && (
+                  <button
+                    className="remove-photo"
+                    onClick={async () => {
+                      if (await multiplayer.sharePhoto(null)) close();
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    차에서 내리기
+                  </button>
+                )}
             </div>
           </>
         )}

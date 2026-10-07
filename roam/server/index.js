@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
+import { createGalleryStore, GalleryError } from "./gallery.js";
 
 const COLORS = [
   "#ef7861",
@@ -29,8 +30,7 @@ const MAX_MOVEMENT_BUDGET = 6;
 // delayed group drains, without banking that credit during normal idle ticks.
 const MOVEMENT_GAP_MS = 240;
 const MOVEMENT_CATCHUP_MS = 250;
-const MAX_CATCHUP_MOVEMENT_BUDGET =
-  MAX_MOVEMENT_BUDGET + MAX_MOVEMENT_SPEED;
+const MAX_CATCHUP_MOVEMENT_BUDGET = MAX_MOVEMENT_BUDGET + MAX_MOVEMENT_SPEED;
 const MAX_STANDARD_MESSAGE_BYTES = 8192;
 const MAX_PHOTO_BYTES = 512 * 1024;
 const MAX_WEBSOCKET_PAYLOAD_BYTES = 740 * 1024;
@@ -99,7 +99,7 @@ function normalizeNickname(value) {
     : null;
 }
 
-function validatePhotoSource(src) {
+export function validatePhotoSource(src) {
   if (typeof src !== "string") return "invalid_photo";
   const comma = src.indexOf(",");
   const mime = src.slice(0, comma);
@@ -147,15 +147,23 @@ function validatePhotoSource(src) {
         : webp)
   )
     return "invalid_photo";
-  return null;
+  return { mime: mime.slice(5, -7), bytes };
 }
 
 /**
  * One ephemeral room. Deploy this process as a single instance: room state is
  * shared by its WebSocket clients, and intentionally resets when it restarts.
+ * The gallery is stored separately on disk and survives room restarts.
  * ALLOWED_ORIGINS is an optional comma-separated override of the default list.
  */
-export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
+export function createGameServer({
+  allowedOrigins,
+  maxPlayers = 10,
+  galleryDirectory = process.env.GALLERY_DIR ||
+    fileURLToPath(new URL("../data/gallery", import.meta.url)),
+  galleryMaxBytes = Number(process.env.GALLERY_MAX_BYTES || 1024 * 1024 * 1024),
+  galleryMaxItems = 50_000,
+} = {}) {
   if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 10) {
     throw new RangeError("maxPlayers must be an integer between 1 and 10");
   }
@@ -166,30 +174,99 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
   const photos = new Map();
   const popCooldowns = new Map();
   const messages = [];
+  const gallery = createGalleryStore(galleryDirectory, {
+    maxBytes: galleryMaxBytes,
+    maxItems: galleryMaxItems,
+  });
+  const pendingPhotos = new Set();
+  let activeImages = 0;
   let closing = false;
 
-  const server = createServer((request, response) => {
-    if (request.method === "GET" && request.url?.split("?")[0] === "/health") {
-      if (originAllowed(request.headers.origin)) {
-        response.setHeader(
-          "Access-Control-Allow-Origin",
-          request.headers.origin,
-        );
-        response.setHeader("Vary", "Origin");
-      }
-      response.writeHead(200, {
+  const server = createServer(async (request, response) => {
+    response.setHeader("Vary", "Origin");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    if (originAllowed(request.headers.origin)) {
+      response.setHeader("Access-Control-Allow-Origin", request.headers.origin);
+    }
+    const json = (status, value) => {
+      response.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "no-store",
       });
-      response.end(
-        JSON.stringify({ ok: true, players: players.size, maxPlayers }),
-      );
-      return;
+      response.end(JSON.stringify(value));
+    };
+    try {
+      // Match raw path segments; never decode uploaded IDs into filesystem paths.
+      const [path] = (request.url || "").split("?");
+      if (request.method !== "GET") return json(404, { error: "Not found" });
+      if (path === "/health")
+        return json(200, { ok: true, players: players.size, maxPlayers });
+      if (path === "/gallery") {
+        const params = new URL(request.url, "http://localhost").searchParams;
+        if (
+          params.getAll("limit").length > 1 ||
+          params.getAll("before").length > 1
+        ) {
+          throw new GalleryError("Invalid gallery pagination", 400);
+        }
+        return json(
+          200,
+          await gallery.list({
+            limit: params.get("limit") ?? "24",
+            before: params.get("before"),
+          }),
+        );
+      }
+      if (path.startsWith("/gallery/photos/")) {
+        if (activeImages >= 32)
+          throw new GalleryError("Gallery image service is busy");
+        activeImages += 1;
+        let reading = true;
+        let completed = false;
+        let released = false;
+        const release = () => {
+          if (!reading && completed && !released) {
+            released = true;
+            activeImages -= 1;
+          }
+        };
+        for (const event of ["finish", "close"])
+          response.once(event, () => {
+            completed = true;
+            release();
+          });
+        response.setTimeout(15_000, () => response.destroy());
+        try {
+          const { bytes, mime } = await gallery.image(
+            path.slice("/gallery/photos/".length),
+          );
+          if (!response.destroyed) {
+            response.writeHead(200, {
+              "Content-Type": mime,
+              "Content-Length": bytes.length,
+              "Cache-Control": "public, max-age=31536000, immutable",
+            });
+            response.end(bytes);
+          }
+        } finally {
+          reading = false;
+          release();
+        }
+        return;
+      }
+      json(404, { error: "Not found" });
+    } catch (error) {
+      if (response.destroyed) return;
+      const status = error instanceof GalleryError ? error.status : 503;
+      json(status, {
+        error:
+          status === 400
+            ? "Invalid gallery pagination"
+            : status === 404
+              ? "Photo not found"
+              : "Gallery temporarily unavailable",
+      });
     }
-    response.writeHead(404, {
-      "Content-Type": "application/json; charset=utf-8",
-    });
-    response.end(JSON.stringify({ error: "Not found" }));
   });
 
   const sockets = new WebSocketServer({
@@ -524,9 +601,10 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
     });
   }
 
-  function photo(session, data, now) {
+  async function photo(session, data, now) {
     const { id: playerId, nickname } = session.player;
     if (data.src === null) {
+      session.photoVersion += 1;
       const removed = {
         playerId,
         nickname,
@@ -537,7 +615,7 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
       else send(session.socket, { type: "photo", photo: removed });
       return;
     }
-    if (now - session.lastPhotoAt < PHOTO_COOLDOWN_MS) {
+    if (session.photoPending || now - session.lastPhotoAt < PHOTO_COOLDOWN_MS) {
       error(
         session.socket,
         "rate_limited",
@@ -549,26 +627,54 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
     // Limit upload attempts before base64 validation/decoding; clearing never
     // consumes or bypasses this budget, and is always available immediately.
     session.lastPhotoAt = now;
-    const invalid = validatePhotoSource(data.src);
-    if (invalid) {
+    const validated = validatePhotoSource(data.src);
+    if (typeof validated === "string") {
       error(
         session.socket,
-        invalid,
-        invalid === "photo_too_large"
+        validated,
+        validated === "photo_too_large"
           ? "Keep shared photos at or below 512 KiB."
           : "Share a valid JPEG, PNG, or WebP image.",
         "photo",
       );
       return;
     }
-    const current = {
-      playerId,
-      nickname,
-      src: data.src,
-      createdAt: new Date().toISOString(),
-    };
-    photos.set(playerId, current);
-    broadcast({ type: "photo", photo: current });
+    session.photoPending = true;
+    const version = ++session.photoVersion;
+    try {
+      const item = await gallery.save({ nickname, ...validated });
+      // A completed upload remains archived even if its author disconnected or
+      // cleared the car during disk I/O. Neither case resurrects a car photo.
+      if (!closing) broadcast({ type: "gallery:new", item });
+      if (
+        sessions.get(session.socket) === session &&
+        session.photoVersion === version &&
+        session.socket.readyState === WebSocket.OPEN &&
+        !closing
+      ) {
+        const current = {
+          playerId,
+          nickname,
+          src: data.src,
+          createdAt: item.createdAt,
+        };
+        photos.set(playerId, current);
+        broadcast({ type: "photo", photo: current });
+      }
+    } catch (failure) {
+      error(
+        session.socket,
+        failure.code === "gallery_full"
+          ? "gallery_full"
+          : "gallery_unavailable",
+        failure.code === "gallery_full"
+          ? "사진 보관함이 가득 찼어요. 기존 사진은 그대로 보관되어 있어요."
+          : "사진을 보관하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        "photo",
+      );
+    } finally {
+      session.photoPending = false;
+    }
   }
 
   sockets.on("connection", (socket) => {
@@ -586,6 +692,8 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
       lastHonkAt: -Infinity,
       lastTeleportAt: -Infinity,
       lastPhotoAt: -Infinity,
+      photoPending: false,
+      photoVersion: 0,
       lastInteractionAt: -Infinity,
       joinTimeout: setTimeout(() => {
         error(
@@ -610,6 +718,7 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
     });
 
     socket.on("message", (raw, isBinary) => {
+      if (closing) return;
       const now = performance.now();
       if (now - session.windowAt >= 1000) {
         session.windowAt = now;
@@ -680,8 +789,11 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
       if (data.type === "move") move(session, data, now);
       else if (data.type === "chat") chat(session, data, now);
       else if (data.type === "teleport") teleport(session, data, now);
-      else if (data.type === "photo") photo(session, data, now);
-      else if (data.type === "interaction") interaction(session, data, now);
+      else if (data.type === "photo") {
+        const pending = photo(session, data, now);
+        pendingPhotos.add(pending);
+        pending.finally(() => pendingPhotos.delete(pending));
+      } else if (data.type === "interaction") interaction(session, data, now);
       else if (data.type === "honk") {
         if (now - session.lastHonkAt < 1000) {
           error(
@@ -758,7 +870,9 @@ export function createGameServer({ allowedOrigins, maxPlayers = 10 } = {}) {
   const close = server.close;
   server.close = function closeGameServer(callback) {
     shutdown();
-    return close.call(this, callback);
+    return close.call(this, (error) => {
+      Promise.allSettled([...pendingPhotos]).then(() => callback?.(error));
+    });
   };
   server.on("close", shutdown);
   return server;

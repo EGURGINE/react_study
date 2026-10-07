@@ -14,7 +14,8 @@ export function useMultiplayer(position, notify, onInteraction) {
     [correction, setCorrection] = useState(null),
     [traveling, setTraveling] = useState(false),
     [photos, setPhotos] = useState({}),
-    [uploading, setUploading] = useState(false);
+    [uploading, setUploading] = useState(false),
+    [galleryVersion, setGalleryVersion] = useState(0);
   const socket = useRef(null),
     identity = useRef(null),
     pending = useRef(null),
@@ -116,6 +117,8 @@ export function useMultiplayer(position, notify, onInteraction) {
             }
           }
           if (data.type === "honk") setHonk({ id: data.id, at: Date.now() });
+          if (data.type === "gallery:new")
+            setGalleryVersion((version) => version + 1);
           if (
             data.type === "interaction" &&
             data.playerId !== identity.current?.id
@@ -342,6 +345,7 @@ export function useMultiplayer(position, notify, onInteraction) {
     photos,
     sharePhoto,
     uploading,
+    galleryVersion,
     emitInteraction,
   };
 }

@@ -1,8 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { WebSocket } from "ws";
 import { createGameServer } from "./index.js";
+import { createGalleryStore } from "./gallery.js";
 
 const ORIGIN = "http://localhost:5173";
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9]);
@@ -15,15 +26,30 @@ const PNG = photoSource("png", PNG_BYTES);
 const WEBP = photoSource("webp", WEBP_BYTES);
 
 async function fixture(t, options = {}) {
-  const server = createGameServer({ allowedOrigins: [ORIGIN], ...options });
+  const galleryDirectory =
+    options.galleryDirectory ??
+    (await mkdtemp(join(tmpdir(), "roam-gallery-test-")));
+  const server = createGameServer({
+    allowedOrigins: [ORIGIN],
+    ...options,
+    galleryDirectory,
+  });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   const base = `http://127.0.0.1:${address.port}`;
   const clients = [];
-  t.after(async () => {
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
     for (const client of clients) client.socket.terminate();
     await new Promise((resolve) => server.close(resolve));
+  };
+  t.after(async () => {
+    await close();
+    if (!options.galleryDirectory)
+      await rm(galleryDirectory, { recursive: true, force: true });
   });
 
   async function connect() {
@@ -76,7 +102,7 @@ async function fixture(t, options = {}) {
     await once(socket, "open");
     return client;
   }
-  return { server, base, connect };
+  return { server, base, connect, close, galleryDirectory };
 }
 
 async function approach(client, current, target) {
@@ -519,6 +545,11 @@ test("photo validation rejects unsupported types, MIME mismatches, malformed bas
   }
   const newcomer = await room.connect();
   assert.deepEqual((await newcomer.join("No Invalid Photos")).photos, []);
+  assert.deepEqual(
+    (await fetch(`${room.base}/gallery`).then((response) => response.json()))
+      .items,
+    [],
+  );
 });
 
 test("a 512 KiB photo is accepted and survives the next welcome snapshot", async (t) => {
@@ -559,6 +590,13 @@ test("a new photo replaces the previous one after the three-second cooldown", as
   author.send({ type: "photo", src: PNG });
   const replaced = await author.wait((message) => message.type === "photo");
   assert.equal(replaced.photo.src, PNG);
+  const archive = await fetch(`${room.base}/gallery`).then((response) =>
+    response.json(),
+  );
+  assert.equal(archive.items.length, 2);
+  assert.notEqual(archive.items[0].id, archive.items[1].id);
+  const original = await fetch(`${room.base}${archive.items[1].path}`);
+  assert.deepEqual(Buffer.from(await original.arrayBuffer()), JPEG_BYTES);
   const viewer = await room.connect();
   assert.deepEqual((await viewer.join("Replacement Viewer")).photos, [
     { ...replaced.photo, playerId: welcome.player.id },
@@ -899,9 +937,39 @@ test("invalid movement returns only the last acknowledged public player pose", a
 test("verified boosts, jumps, and bumpers tolerate delayed frame batches at their real speeds", async (t) => {
   const room = await fixture(t);
   const effects = [
-    { id: "boost-1", destination: "play", x: 16, z: 0, dx: -1, dz: 0, speed: 13, jump: 0, impossible: { x: -20, z: 0 } },
-    { id: "jump-1", destination: "play", x: 14, z: 11, dx: -1, dz: 0, speed: 13, jump: 8.8, impossible: { x: -18, z: -8 } },
-    { id: "bumper-1", destination: "start", x: -8, z: 16, dx: 0, dz: -1, speed: 10, jump: 3.5, impossible: { x: 18, z: -8 } },
+    {
+      id: "boost-1",
+      destination: "play",
+      x: 16,
+      z: 0,
+      dx: -1,
+      dz: 0,
+      speed: 13,
+      jump: 0,
+      impossible: { x: -20, z: 0 },
+    },
+    {
+      id: "jump-1",
+      destination: "play",
+      x: 14,
+      z: 11,
+      dx: -1,
+      dz: 0,
+      speed: 13,
+      jump: 8.8,
+      impossible: { x: -18, z: -8 },
+    },
+    {
+      id: "bumper-1",
+      destination: "start",
+      x: -8,
+      z: 16,
+      dx: 0,
+      dz: -1,
+      speed: 10,
+      jump: 3.5,
+      impossible: { x: 18, z: -8 },
+    },
   ];
   for (const effect of effects) {
     const client = await room.connect();
@@ -939,10 +1007,19 @@ test("verified boosts, jumps, and bumpers tolerate delayed frame batches at thei
       };
       client.send({ type: "move", ...finalPosition });
     }
-    const state = await client.wait((message) => message.type === "state"
-      && message.players.some((player) => player.id === welcome.player.id
-        && player.x === finalPosition.x && player.z === finalPosition.z));
-    const player = state.players.find((candidate) => candidate.id === welcome.player.id);
+    const state = await client.wait(
+      (message) =>
+        message.type === "state" &&
+        message.players.some(
+          (player) =>
+            player.id === welcome.player.id &&
+            player.x === finalPosition.x &&
+            player.z === finalPosition.z,
+        ),
+    );
+    const player = state.players.find(
+      (candidate) => candidate.id === welcome.player.id,
+    );
     assert.equal(player.y, finalPosition.y);
     assert.deepEqual(unexpected, []);
     client.socket.off("message", recordErrors);
@@ -969,15 +1046,28 @@ test("earned catch-up credit expires and teleport does not preserve it", async (
   const room = await fixture(t);
   for (const resetWithTeleport of [false, true]) {
     const client = await room.connect();
-    const welcome = await client.join(resetWithTeleport ? "Teleport Credit" : "Expiring Credit");
+    const welcome = await client.join(
+      resetWithTeleport ? "Teleport Credit" : "Expiring Credit",
+    );
     await new Promise((resolve) => setTimeout(resolve, 800));
-    let pose = { x: welcome.player.x + 8, y: 0, z: welcome.player.z, heading: 0 };
+    let pose = {
+      x: welcome.player.x + 8,
+      y: 0,
+      z: welcome.player.z,
+      heading: 0,
+    };
     client.send({ type: "move", ...pose });
-    await client.wait((message) => message.type === "state"
-      && message.players.some((player) => player.id === welcome.player.id && player.x === pose.x));
+    await client.wait(
+      (message) =>
+        message.type === "state" &&
+        message.players.some(
+          (player) => player.id === welcome.player.id && player.x === pose.x,
+        ),
+    );
     if (resetWithTeleport) {
       client.send({ type: "teleport", destination: "start" });
-      pose = (await client.wait((message) => message.type === "teleport")).player;
+      pose = (await client.wait((message) => message.type === "teleport"))
+        .player;
     } else {
       for (let frame = 0; frame < 4; frame += 1) {
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -985,7 +1075,393 @@ test("earned catch-up credit expires and teleport does not preserve it", async (
       }
     }
     client.send({ type: "move", ...pose, x: pose.x + 9 });
-    assert.equal((await client.wait((message) => message.type === "error")).code, "invalid_move");
+    assert.equal(
+      (await client.wait((message) => message.type === "error")).code,
+      "invalid_move",
+    );
     await client.close();
   }
+});
+
+test("gallery saves before acknowledgement, keeps exact public images, and survives clearing, leaving, and restart", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "roam-gallery-restart-"));
+  // Register cleanup after explicit closes below so no server can write here.
+  const room = await fixture(t, { galleryDirectory: directory });
+  const author = await room.connect();
+  const viewer = await room.connect();
+  await author.join("사진 작가");
+  await viewer.join("Gallery Viewer");
+  author.send({
+    type: "photo",
+    src: JPEG,
+    nickname: "Forged Name",
+    createdAt: "1900-01-01",
+  });
+  const acknowledged = await author.wait((message) => message.type === "photo");
+  const announcement = await viewer.wait(
+    (message) => message.type === "gallery:new",
+  );
+  const { item } = announcement;
+  assert.deepEqual(Object.keys(item).sort(), [
+    "createdAt",
+    "id",
+    "nickname",
+    "path",
+  ]);
+  assert.equal(item.nickname, "사진 작가");
+  assert.equal(item.createdAt, acknowledged.photo.createdAt);
+  assert.ok(Date.now() - Date.parse(item.createdAt) < 5000);
+  assert.equal(item.path, `/gallery/photos/${item.id}`);
+  const disk = JSON.parse(
+    await readFile(join(directory, item.id, "metadata.json"), "utf8"),
+  );
+  assert.equal(disk.nickname, "사진 작가");
+  assert.deepEqual(
+    await readFile(join(directory, item.id, "image")),
+    JPEG_BYTES,
+  );
+  assert.ok(
+    (await readdir(directory)).every((name) => !name.startsWith(".pending-")),
+  );
+  const listResponse = await fetch(`${room.base}/gallery`, {
+    headers: { Origin: ORIGIN },
+  });
+  assert.equal(listResponse.headers.get("access-control-allow-origin"), ORIGIN);
+  assert.equal(listResponse.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await listResponse.json(), {
+    items: [item],
+    nextCursor: null,
+  });
+  const imageResponse = await fetch(`${room.base}${item.path}`);
+  assert.equal(imageResponse.headers.get("content-type"), "image/jpeg");
+  assert.equal(imageResponse.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(
+    Number(imageResponse.headers.get("content-length")),
+    JPEG_BYTES.length,
+  );
+  assert.match(imageResponse.headers.get("cache-control"), /immutable/);
+  assert.deepEqual(Buffer.from(await imageResponse.arrayBuffer()), JPEG_BYTES);
+  author.send({ type: "photo", src: null });
+  await author.wait(
+    (message) => message.type === "photo" && message.photo.src === null,
+  );
+  await author.close();
+  await room.close();
+
+  const restarted = await fixture(t, { galleryDirectory: directory });
+  const newcomer = await restarted.connect();
+  assert.deepEqual((await newcomer.join("After Restart")).photos, []);
+  assert.deepEqual(
+    await fetch(`${restarted.base}/gallery`).then((response) =>
+      response.json(),
+    ),
+    { items: [item], nextCursor: null },
+  );
+  assert.deepEqual(
+    Buffer.from(
+      await fetch(`${restarted.base}${item.path}`).then((response) =>
+        response.arrayBuffer(),
+      ),
+    ),
+    JPEG_BYTES,
+  );
+  await restarted.close();
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("gallery pagination keeps every upload reachable while new photos arrive", async (t) => {
+  const room = await fixture(t);
+  const store = createGalleryStore(room.galleryDirectory);
+  const saved = [];
+  for (let index = 0; index < 7; index += 1) {
+    saved.push(
+      await store.save({
+        nickname: `Photo ${index}`,
+        mime: "image/png",
+        bytes: PNG_BYTES,
+      }),
+    );
+  }
+  const first = await fetch(`${room.base}/gallery?limit=2`).then((response) =>
+    response.json(),
+  );
+  assert.deepEqual(first.items, saved.slice(-2).reverse());
+  assert.ok(first.nextCursor);
+  await store.save({
+    nickname: "Newest Photo",
+    mime: "image/webp",
+    bytes: WEBP_BYTES,
+  });
+  const seen = [...first.items];
+  let cursor = first.nextCursor;
+  while (cursor) {
+    const page = await fetch(
+      `${room.base}/gallery?limit=2&before=${encodeURIComponent(cursor)}`,
+    ).then((response) => response.json());
+    assert.ok(page.items.length > 0 && page.items.length <= 2);
+    seen.push(...page.items);
+    cursor = page.nextCursor;
+  }
+  assert.deepEqual(seen, [...saved].reverse());
+  assert.equal(new Set(seen.map((item) => item.id)).size, 7);
+  const simultaneous = await Promise.all(
+    Array.from({ length: 6 }, () =>
+      fetch(`${room.base}/gallery?limit=2`).then((response) => response.json()),
+    ),
+  );
+  assert.ok(simultaneous.every((page) => page.items.length === 2));
+  const untrusted = await fetch(`${room.base}/gallery`, {
+    headers: { Origin: "https://untrusted.example" },
+  });
+  assert.equal(untrusted.status, 200); // Read-only gallery is intentionally public.
+  assert.equal(untrusted.headers.get("access-control-allow-origin"), null);
+  const latest = (await untrusted.json()).items[0];
+  const webp = await fetch(`${room.base}${latest.path}`);
+  assert.equal(webp.headers.get("content-type"), "image/webp");
+  assert.deepEqual(Buffer.from(await webp.arrayBuffer()), WEBP_BYTES);
+});
+
+test("gallery rejects invalid pagination and traversal paths without exposing local files", async (t) => {
+  const room = await fixture(t);
+  for (const query of [
+    "limit=0",
+    "limit=49",
+    "limit=1.5",
+    "limit=-1",
+    "limit=2&limit=3",
+    "before=",
+    "before=../../package.json",
+    "before=x&before=y",
+  ]) {
+    assert.equal(
+      (await fetch(`${room.base}/gallery?${query}`)).status,
+      400,
+      query,
+    );
+  }
+  for (const path of [
+    "/gallery/photos/%2e%2e%2fpackage.json",
+    "/gallery/photos/%252e%252e",
+    "/gallery/photos/metadata.json",
+    "/gallery/photos/0000000000000-00000000-0000-4000-8000-000000000000",
+    "/gallery/photos/x/image",
+  ]) {
+    assert.equal((await fetch(`${room.base}${path}`)).status, 404, path);
+  }
+  assert.deepEqual(
+    await fetch(`${room.base}/gallery`).then((response) => response.json()),
+    { items: [], nextCursor: null },
+  );
+});
+
+test("gallery capacity is reserved across concurrent uploads and remains enforced after restart", async (t) => {
+  const room = await fixture(t, { galleryMaxBytes: JPEG_BYTES.length });
+  const first = await room.connect();
+  const second = await room.connect();
+  await first.join("Capacity One");
+  await second.join("Capacity Two");
+  first.send({ type: "photo", src: JPEG });
+  second.send({ type: "photo", src: JPEG });
+  const results = await Promise.all(
+    [first, second].map((client) =>
+      client.wait(
+        (message) => message.type === "gallery:new" || message.type === "error",
+      ),
+    ),
+  );
+  assert.equal(
+    results.filter((message) => message.type === "gallery:new").length,
+    1,
+  );
+  const rejected = results.find((message) => message.type === "error");
+  assert.equal(rejected.code, "gallery_full");
+  assert.equal(rejected.operation, "photo");
+  assert.match(rejected.message, /[가-힣]/);
+  const accepted = results.find(
+    (message) => message.type === "gallery:new",
+  ).item;
+  assert.deepEqual(
+    (await fetch(`${room.base}/gallery`).then((response) => response.json()))
+      .items,
+    [accepted],
+  );
+  await room.close();
+  const restarted = await fixture(t, {
+    galleryDirectory: room.galleryDirectory,
+    galleryMaxBytes: JPEG_BYTES.length,
+  });
+  const newcomer = await restarted.connect();
+  await newcomer.join("Still Full");
+  newcomer.send({ type: "photo", src: PNG });
+  const stillFull = await newcomer.wait((message) => message.type === "error");
+  assert.equal(stillFull.code, "gallery_full");
+  assert.deepEqual(
+    (
+      await fetch(`${restarted.base}/gallery`).then((response) =>
+        response.json(),
+      )
+    ).items,
+    [accepted],
+  );
+  await restarted.close();
+});
+
+test("gallery I/O errors reject uploads without acknowledging or changing car photos", async (t) => {
+  const room = await fixture(t);
+  const author = await room.connect();
+  await author.join("Disk Failure");
+  author.send({ type: "photo", src: JPEG });
+  const first = await author.wait((message) => message.type === "photo");
+  const item = (await author.wait((message) => message.type === "gallery:new"))
+    .item;
+  // Corrupting metadata models a damaged archive. Reads fail explicitly rather
+  // than silently dropping its history; existing image files are not deleted.
+  await writeFile(
+    join(room.galleryDirectory, item.id, "metadata.json"),
+    "broken json",
+  );
+  assert.equal((await fetch(`${room.base}/gallery`)).status, 503);
+  await room.close();
+  const restarted = await fixture(t, {
+    galleryDirectory: room.galleryDirectory,
+  });
+  const uploader = await restarted.connect();
+  await uploader.join("Unreadable Disk");
+  uploader.send({ type: "photo", src: PNG });
+  const failed = await uploader.wait((message) => message.type === "error");
+  assert.equal(failed.code, "gallery_unavailable");
+  assert.equal(failed.operation, "photo");
+  const observer = await restarted.connect();
+  assert.deepEqual((await observer.join("No False Success")).photos, []);
+  assert.deepEqual(
+    await readFile(join(room.galleryDirectory, item.id, "image")),
+    JPEG_BYTES,
+  );
+  assert.equal(first.photo.src, JPEG);
+  await restarted.close();
+});
+
+test("gallery limits retain an already displayed car photo and its archived original", async (t) => {
+  const room = await fixture(t, { galleryMaxBytes: JPEG_BYTES.length });
+  const author = await room.connect();
+  await author.join("Keep My Photo");
+  author.send({ type: "photo", src: JPEG });
+  const previous = await author.wait((message) => message.type === "photo");
+  await new Promise((resolve) => setTimeout(resolve, 3050));
+  author.send({ type: "photo", src: PNG });
+  assert.equal(
+    (await author.wait((message) => message.type === "error")).code,
+    "gallery_full",
+  );
+  const viewer = await room.connect();
+  assert.deepEqual((await viewer.join("Still Visible")).photos, [
+    previous.photo,
+  ]);
+  assert.equal(
+    (await fetch(`${room.base}/gallery`).then((response) => response.json()))
+      .items.length,
+    1,
+  );
+});
+
+test("gallery reserves item limits and accounts for interrupted uploads without deleting history", async (t) => {
+  const room = await fixture(t);
+  const stageId = "1700000000000-00000000-0000-4000-8000-000000000000";
+  await mkdir(join(room.galleryDirectory, `.pending-${stageId}`));
+  await writeFile(
+    join(room.galleryDirectory, `.pending-${stageId}`, "image"),
+    JPEG_BYTES,
+  );
+  const store = createGalleryStore(room.galleryDirectory, {
+    maxItems: 2,
+    maxBytes: 100,
+  });
+  const item = await store.save({
+    nickname: "Stored Photo",
+    mime: "image/png",
+    bytes: PNG_BYTES,
+  });
+  await assert.rejects(
+    store.save({
+      nickname: "One Too Many",
+      mime: "image/jpeg",
+      bytes: JPEG_BYTES,
+    }),
+    (error) => error.code === "gallery_full",
+  );
+  assert.deepEqual(await store.list(), { items: [item], nextCursor: null });
+  assert.deepEqual(
+    await readFile(join(room.galleryDirectory, `.pending-${stageId}`, "image")),
+    JPEG_BYTES,
+  );
+  const byteLimited = createGalleryStore(room.galleryDirectory, {
+    maxBytes: PNG_BYTES.length + JPEG_BYTES.length,
+  });
+  await assert.rejects(
+    byteLimited.save({
+      nickname: "No Disk Room",
+      mime: "image/jpeg",
+      bytes: JPEG_BYTES,
+    }),
+    (error) => error.code === "gallery_full",
+  );
+});
+
+test("gallery refuses oversized on-disk images and metadata instead of reading unbounded files", async (t) => {
+  const room = await fixture(t);
+  const store = createGalleryStore(room.galleryDirectory);
+  const item = await store.save({
+    nickname: "Bounded Image",
+    mime: "image/jpeg",
+    bytes: JPEG_BYTES,
+  });
+  await writeFile(
+    join(room.galleryDirectory, item.id, "image"),
+    Buffer.alloc(512 * 1024 + 1),
+  );
+  assert.equal((await fetch(`${room.base}${item.path}`)).status, 503);
+  await writeFile(
+    join(room.galleryDirectory, item.id, "metadata.json"),
+    " ".repeat(2049),
+  );
+  assert.equal((await fetch(`${room.base}/gallery`)).status, 503);
+});
+
+test("clearing or disconnecting during gallery persistence never resurrects a car photo", async (t) => {
+  const room = await fixture(t);
+  const observer = await room.connect();
+  await observer.join("Watching Storage");
+  for (const disconnect of [false, true]) {
+    const author = await room.connect();
+    const welcome = await author.join(
+      disconnect ? "Leaving Upload" : "Clearing Upload",
+    );
+    author.send({ type: "photo", src: JPEG });
+    if (disconnect) await author.close();
+    else {
+      author.send({ type: "photo", src: null });
+      await author.wait(
+        (message) => message.type === "photo" && message.photo.src === null,
+      );
+    }
+    const saved = await observer.wait(
+      (message) =>
+        message.type === "gallery:new" &&
+        message.item.nickname === welcome.player.nickname,
+    );
+    assert.equal((await fetch(`${room.base}${saved.item.path}`)).status, 200);
+    const newcomer = await room.connect();
+    assert.deepEqual(
+      (await newcomer.join(disconnect ? "After Departure" : "After Clear"))
+        .photos,
+      [],
+    );
+    await newcomer.close();
+    if (!disconnect) await author.close();
+  }
+  assert.equal(
+    (await fetch(`${room.base}/gallery`).then((response) => response.json()))
+      .items.length,
+    2,
+  );
 });

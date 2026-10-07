@@ -5,6 +5,9 @@ export default defineConfig({
   base: process.env.GITHUB_ACTIONS ? "/react_study/" : "/",
   server: {
     proxy: {
+      "/gallery": {
+        target: "http://127.0.0.1:3001",
+      },
       "/socket": {
         target: "ws://127.0.0.1:3001",
         ws: true,
