@@ -52,10 +52,10 @@ function disposeScene(scene) {
   for (const value of materials) value.dispose();
 }
 
-test("100-item catalog preserves saved items and exposes every item to the game", () => {
-  assert.equal(ITEMS.length, 100);
-  assert.equal(new Set(ITEMS.map((item) => item.id)).size, 100);
-  assert.equal(new Set(ITEMS.map((item) => item.name)).size, 100);
+test("expanded catalog preserves saved items and exposes every item to the game", () => {
+  assert.equal(ITEMS.length, 108);
+  assert.equal(new Set(ITEMS.map((item) => item.id)).size, 108);
+  assert.equal(new Set(ITEMS.map((item) => item.name)).size, 108);
   assert.equal(configuredItems, ITEMS);
   assert.deepEqual(
     Object.fromEntries(
@@ -64,7 +64,7 @@ test("100-item catalog preserves saved items and exposes every item to the game"
         ITEMS.filter((item) => item.type === type).length,
       ]),
     ),
-    { body: 35, trail: 31, spray: 34 },
+    { body: 43, trail: 31, spray: 34 },
   );
   for (const [id, rarity, name, color, style] of original) {
     const expected = { id, type: id.split("-")[0], rarity, name, color, style };
@@ -75,7 +75,9 @@ test("100-item catalog preserves saved items and exposes every item to the game"
   for (const item of ITEMS) {
     assert.match(item.id, /^(body|trail|spray)-[a-z0-9-]+$/);
     assert.match(item.color, /^#[a-f0-9]{6}$/);
-    assert.ok(["common", "rare", "epic", "legendary"].includes(item.rarity));
+    assert.ok(
+      ["common", "rare", "epic", "legendary", "mythic"].includes(item.rarity),
+    );
     assert.ok(
       { body: BODY_STYLES, trail: TRAIL_STYLES, spray: SPRAY_STYLES }[
         item.type
@@ -84,6 +86,10 @@ test("100-item catalog preserves saved items and exposes every item to the game"
     );
     assert.equal(ITEM_BY_ID.get(item.id), item);
   }
+  const mythics = ITEMS.filter((item) => item.rarity === "mythic");
+  assert.equal(mythics.length, 5);
+  assert.equal(new Set(mythics.map((item) => item.style)).size, 5);
+  assert.ok(mythics.every((item) => item.type === "body" && !item.starter));
 });
 
 test("every body unlock selects exactly one supported, independently colored shell", () => {

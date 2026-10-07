@@ -442,6 +442,123 @@
   background: #dce7cf;
   opacity: 1;
 }
+.inventory-item.locked .item-art.body {
+  opacity: 0.9;
+  filter: none;
+}
+.inventory-item.rarity-mythic {
+  border-color: color-mix(
+    in srgb,
+    var(--rarity-color),
+    var(--ui-border, #e2e5d9) 55%
+  );
+  border-top-color: var(--rarity-color);
+}
+.item-art > .item-car.mythic {
+  filter: drop-shadow(
+    0 2px 2px color-mix(in srgb, var(--item-color), transparent 65%)
+  );
+}
+.vehicle-comparison-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--ui-muted, #7c8770);
+  margin: -2px 0 17px;
+  font-size: 10px;
+  line-height: 1.7;
+}
+.vehicle-comparison-note > svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.vehicle-comparison-note strong {
+  font-weight: 500;
+  color: var(--ui-ink, #3b533e);
+}
+.vehicle-profile {
+  width: 100%;
+  margin-top: 8px;
+  text-align: left;
+  color: var(--ui-ink, #3b533e);
+}
+.vehicle-character {
+  display: block;
+  color: var(--ui-accent, #617b50);
+  font-size: 10px;
+  font-weight: 600;
+}
+.vehicle-profile .vehicle-description {
+  margin: 5px 0 10px;
+  min-height: 3em;
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--ui-muted, #7c8770);
+}
+.vehicle-stats {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 13px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.vehicle-stats > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+.vehicle-stats dt {
+  color: var(--ui-muted, #7c8770);
+}
+.vehicle-stats dd {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin: 0;
+}
+.vehicle-stats b {
+  font-weight: 500;
+}
+.vehicle-stat-delta {
+  min-width: 28px;
+  text-align: right;
+  font-size: 8px;
+}
+.vehicle-stat-delta.higher {
+  color: var(--ui-accent, #617b50);
+}
+.vehicle-stat-delta.lower {
+  color: color-mix(in srgb, var(--ui-ink, #3b533e) 62%, #bd6f58);
+}
+.vehicle-stat-delta.same {
+  color: var(--ui-muted, #7c8770);
+  opacity: 0.7;
+}
+.inventory-item.is-vehicle > button {
+  margin-top: auto;
+}
+.vehicle-test-drive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px 0;
+  color: var(--ui-muted, #7c8770);
+  font-size: 9px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.vehicle-test-drive:hover {
+  color: var(--ui-accent, #617b50);
+}
+.crate-result .vehicle-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 20px;
+}
+.crate-result .vehicle-description {
+  min-height: 0;
+}
 .game-footnote {
   font-size: 10px;
   color: #929b83;
@@ -745,6 +862,215 @@
 .race-hud-progress > span:last-child i {
   background: #d19b7d;
 }
+.play-mode-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  margin: 0 34px 27px 0;
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ui-panel) 93%, var(--ui-accent));
+}
+.play-mode-tabs button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 10px;
+  border-radius: 10px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.play-mode-tabs button[aria-selected="true"] {
+  color: var(--ui-on-accent);
+  background: var(--ui-accent);
+}
+.arena-preview {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 13px 15px;
+  margin: -5px 0 22px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  color: var(--ui-accent);
+  font-size: 11px;
+}
+.arena-preview > span {
+  flex: 1;
+  text-align: left;
+}
+.arena-entry-details {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 0 0 18px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.arena-entry-details > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.arena-entry-details strong {
+  color: var(--ui-ink);
+  font-weight: 550;
+}
+.arena-current {
+  text-align: left;
+  padding: 21px;
+}
+.arena-room-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+}
+.arena-room-heading h3 {
+  margin-top: 7px;
+}
+.arena-pot {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ui-accent);
+}
+.arena-pot strong {
+  font-size: 19px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.arena-roster {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 18px 0 15px;
+  padding: 0;
+  list-style: none;
+}
+.arena-roster li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  color: var(--ui-accent);
+}
+.arena-roster strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--ui-ink);
+  font-size: 11px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.arena-roster strong em {
+  margin-left: 5px;
+  color: var(--ui-muted);
+  font-size: 9px;
+  font-style: normal;
+  white-space: nowrap;
+}
+.arena-roster small {
+  color: var(--ui-muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.arena-roster .eliminated > svg:first-child {
+  color: var(--ui-muted);
+}
+.arena-roster .eliminated strong {
+  color: var(--ui-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.arena-current .arena-room-note {
+  margin: 12px 0 16px;
+  color: var(--ui-muted);
+  line-height: 1.8;
+  text-align: center;
+}
+.arena-start {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+.arena-current .arena-host-note {
+  display: block;
+  margin: 12px auto 0;
+  text-align: center;
+  line-height: 1.7;
+}
+.arena-room > div {
+  min-width: 0;
+}
+.arena-room strong {
+  overflow-wrap: anywhere;
+}
+.arena-hud .arena-hud-summary {
+  padding: 0;
+  justify-content: center;
+  gap: 8px;
+}
+.arena-hud-summary > strong {
+  font-size: 11px;
+  font-weight: 550;
+}
+.arena-hud .arena-hud-summary > .arena-hud-pot {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ui-accent);
+  padding-left: 9px;
+  border-left: 1px solid var(--ui-border);
+}
+.arena-hud > small {
+  display: block;
+  margin-top: 8px;
+}
+.arena-hud-time {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 520px) {
+  .play-mode-tabs {
+    margin-right: 20px;
+    gap: 4px;
+  }
+  .play-mode-tabs button {
+    font-size: 10px;
+    padding: 10px 6px;
+    gap: 5px;
+  }
+  .arena-current {
+    padding: 17px 13px;
+  }
+  .arena-roster {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .arena-roster li {
+    padding: 8px 10px;
+  }
+  .arena-entry-details {
+    font-size: 10px;
+    gap: 9px;
+  }
+  .arena-hud .arena-hud-summary {
+    gap: 6px;
+  }
+  .arena-hud-summary > strong {
+    font-size: 10px;
+  }
+  .arena-hud .arena-hud-summary > .arena-hud-pot {
+    padding-left: 6px;
+  }
+}
 .rail-status {
   position: absolute;
   z-index: 4;
@@ -938,6 +1264,9 @@
   }
   .crate-result h3 {
     font-size: 19px;
+  }
+  .crate-result .vehicle-stats {
+    grid-template-columns: 1fr;
   }
   .item-art.large {
     width: 77px;

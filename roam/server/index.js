@@ -7,6 +7,13 @@ import { createGalleryStore, GalleryError } from "./gallery.js";
 import { createGameEngine } from "./game.js";
 import { isDriveable, trackPoint } from "../src/gameConfig.js";
 import { DUEL_MOVEMENT_LIMITS } from "../src/duelObstacles.js";
+import { getVehicleProfile } from "../src/vehicleDynamics.js";
+import { ARENA, arenaGuardContact } from "../src/arenaConfig.js";
+import {
+  CAR_CONTACT,
+  carContact,
+  movementVelocity,
+} from "../src/carCollisions.js";
 
 const COLORS = [
   "#ef7861",
@@ -32,7 +39,6 @@ const MAX_MOVEMENT_BUDGET = 6;
 // delayed group drains, without banking that credit during normal idle ticks.
 const MOVEMENT_GAP_MS = 240;
 const MOVEMENT_CATCHUP_MS = 250;
-const MAX_CATCHUP_MOVEMENT_BUDGET = MAX_MOVEMENT_BUDGET + MAX_MOVEMENT_SPEED;
 const MAX_STANDARD_MESSAGE_BYTES = 8192;
 const MAX_PHOTO_BYTES = 512 * 1024;
 const MAX_WEBSOCKET_PAYLOAD_BYTES = 740 * 1024;
@@ -179,6 +185,7 @@ export function createGameServer({
   const players = new Map();
   const photos = new Map();
   const popCooldowns = new Map();
+  const impactCooldowns = new Map();
   const messages = [];
   const gallery = createGalleryStore(galleryDirectory, {
     maxBytes: galleryMaxBytes,
@@ -207,6 +214,7 @@ export function createGameServer({
       Object.assign(session.player, pose);
       session.movementAt = performance.now();
       session.forcedTeleportAt = session.movementAt;
+      resetContact(session, session.movementAt);
       session.movementBudget = MAX_MOVEMENT_BUDGET;
       session.movementCatchupUntil = 0;
       send(session.socket, {
@@ -236,6 +244,13 @@ export function createGameServer({
       if (request.method !== "GET") return json(404, { error: "Not found" });
       if (path === "/health")
         return json(200, { ok: true, players: players.size, maxPlayers });
+      if (path === "/api/arena/honors") {
+        try {
+          return json(200, game.snapshotArenaHonors());
+        } catch {
+          return json(503, { error: "Arena honors temporarily unavailable" });
+        }
+      }
       if (path === "/gallery") {
         const params = new URL(request.url, "http://localhost").searchParams;
         if (
@@ -378,6 +393,10 @@ export function createGameServer({
         }
       }
       players.delete(session.player.id);
+      for (const key of impactCooldowns.keys()) {
+        if (key.split(":").includes(session.player.id))
+          impactCooldowns.delete(key);
+      }
       if (photos.delete(session.player.id) && !closing) {
         broadcast({
           type: "photo",
@@ -469,6 +488,7 @@ export function createGameServer({
     session.player = player;
     session.nicknameKey = nicknameKey;
     session.movementAt = performance.now();
+    resetContact(session, session.movementAt);
     session.movementBudget = MAX_MOVEMENT_BUDGET;
     session.movementCatchupUntil = 0;
     players.set(session.player.id, session);
@@ -481,19 +501,118 @@ export function createGameServer({
       photos: [...photos.values()],
       ...identity,
       races: game.snapshotRaces(),
+      arenas: game.snapshotArenas(),
+      arenaHonors: game.snapshotArenaHonors(),
       sprays: game.recentSprays(),
     });
     broadcastState();
   }
 
-  function move(session, data, now) {
-    if (game.isLocked(session.player.id)) return;
-    const { x, y = 0, z, heading } = data;
+  function resetContact(session, now) {
+    session.contactPose = { ...session.player };
+    session.contactAt = now;
+    session.contactImmuneUntil = now + CAR_CONTACT.immunity;
+    session.velocity = { x: 0, z: 0 };
+  }
+
+  function checkCarContacts(session, previous, now) {
+    const arena = game.arenaFor(session.player.id);
+    const activeArena = arena?.status === "running" ? arena : null;
+    const elapsed = (now - session.contactAt) / 1000;
+    let velocity = movementVelocity(previous, session.player, elapsed);
     if (
-      ![x, y, z, heading].every(
-        (value) => typeof value === "number" && Number.isFinite(value),
-      ) ||
-      !isDriveable(x, z) ||
+      activeArena &&
+      elapsed >= 0.015 &&
+      elapsed <= CAR_CONTACT.stale / 1000
+    ) {
+      const x = (session.player.x - previous.x) / elapsed;
+      const z = (session.player.z - previous.z) / elapsed;
+      const scale = Math.min(1, ARENA.maxSpeed / (Math.hypot(x, z) || 1));
+      velocity = { x: x * scale, z: z * scale };
+    }
+    session.velocity = velocity;
+    session.contactAt = now;
+    session.contactPose = { ...session.player };
+    if (
+      now < session.contactImmuneUntil ||
+      (activeArena &&
+        Math.hypot(session.player.x - ARENA.cx, session.player.z - ARENA.cz) >
+          activeArena.radius + 0.7)
+    )
+      return;
+    for (const other of players.values()) {
+      const otherArena = game.arenaFor(other.player.id);
+      if (
+        other === session ||
+        now < other.contactImmuneUntil ||
+        !game.canMove(other.player.id) ||
+        ((activeArena || (otherArena && otherArena.status !== "waiting")) &&
+          otherArena?.id !== activeArena?.id)
+      )
+        continue;
+      const key = [session.player.id, other.player.id].sort().join(":");
+      if (now - (impactCooldowns.get(key) ?? -Infinity) < CAR_CONTACT.cooldown)
+        continue;
+      const otherVelocity =
+        now - other.contactAt <= CAR_CONTACT.stale
+          ? other.velocity
+          : { x: 0, z: 0 };
+      const impact = carContact(
+        previous,
+        session.player,
+        other.player,
+        velocity,
+        otherVelocity,
+        getVehicleProfile(session.player.cosmetics.body),
+        getVehicleProfile(other.player.cosmetics.body),
+        activeArena ? { mode: "arena" } : undefined,
+      );
+      if (!impact) continue;
+      impactCooldowns.set(key, now);
+      const response = (value) =>
+        activeArena
+          ? {
+              vx: value.vx * 1.75,
+              vz: value.vz * 1.75,
+              spin: value.spin * 1.25,
+            }
+          : value;
+      broadcast({
+        type: "car:impact",
+        ...(activeArena ? { arenaId: activeArena.id } : {}),
+        id: randomUUID(),
+        x: impact.x,
+        z: impact.z,
+        strength: impact.strength,
+        participants: [
+          { id: session.player.id, ...response(impact.a) },
+          { id: other.player.id, ...response(impact.b) },
+        ],
+      });
+    }
+  }
+
+  function move(session, data, now) {
+    if (!game.canMove(session.player.id)) return;
+    const { x, y = 0, z, heading } = data;
+    const finite = [x, y, z, heading].every(
+      (value) => typeof value === "number" && Number.isFinite(value),
+    );
+    const distance = Math.hypot(x - session.player.x, z - session.player.z);
+    if (
+      finite &&
+      now - session.forcedTeleportAt < 250 &&
+      distance > MAX_MOVEMENT_BUDGET
+    )
+      return;
+    const membership = game.arenaFor(session.player.id);
+    const arena = membership?.status === "running" ? membership : null;
+    const maxSpeed = arena ? ARENA.maxSpeed : MAX_MOVEMENT_SPEED;
+    if (
+      !finite ||
+      !(arena
+        ? Math.hypot(x - ARENA.cx, z - ARENA.cz) <= arena.radius + 12
+        : isDriveable(x, z)) ||
       y < 0 ||
       y > DUEL_MOVEMENT_LIMITS.maxHeight
     ) {
@@ -505,7 +624,6 @@ export function createGameServer({
       );
       return;
     }
-    const distance = Math.hypot(x - session.player.x, z - session.player.z);
     // A race finish restores both players immediately. Discard a briefly
     // in-flight pose from the old course instead of flashing a correction.
     if (now - session.forcedTeleportAt < 250 && distance > MAX_MOVEMENT_BUDGET)
@@ -516,13 +634,30 @@ export function createGameServer({
     }
     session.movementBudget = Math.min(
       now < session.movementCatchupUntil
-        ? MAX_CATCHUP_MOVEMENT_BUDGET
+        ? MAX_MOVEMENT_BUDGET + maxSpeed
         : MAX_MOVEMENT_BUDGET,
-      session.movementBudget + elapsed * MAX_MOVEMENT_SPEED,
+      session.movementBudget + elapsed * maxSpeed,
     );
     session.movementAt = now;
+    if (arena) {
+      const contact = arenaGuardContact(
+        session.player,
+        { x, y, z },
+        arena.radius,
+        arena.guards,
+      );
+      if (contact && Math.hypot(contact.x - x, contact.z - z) > 0.04) {
+        error(
+          session.socket,
+          "invalid_move",
+          "가드레일 안쪽으로 위치를 맞췄어요.",
+          "move",
+        );
+        return;
+      }
+    }
     const steps = Math.ceil(distance / 0.5);
-    for (let step = 1; step < steps; step += 1) {
+    for (let step = 1; !arena && step < steps; step += 1) {
       if (
         !isDriveable(
           session.player.x + ((x - session.player.x) * step) / steps,
@@ -549,12 +684,14 @@ export function createGameServer({
       return;
     }
     session.movementBudget = Math.max(0, session.movementBudget - distance);
+    const previousContactPose = session.contactPose;
     Object.assign(session.player, {
       x,
       y,
       z,
       heading: Math.atan2(Math.sin(heading), Math.cos(heading)),
     });
+    checkCarContacts(session, previousContactPose, now);
     try {
       game.onMove(session.player.id, session.player);
     } catch {
@@ -653,6 +790,7 @@ export function createGameServer({
     session.movementBudget = MAX_MOVEMENT_BUDGET;
     session.movementCatchupUntil = 0;
     Object.assign(session.player, DESTINATIONS[data.destination], { y: 0 });
+    resetContact(session, now);
     send(session.socket, { type: "teleport", player: { ...session.player } });
     broadcastState();
   }
@@ -672,7 +810,9 @@ export function createGameServer({
       return;
     }
     if (!Object.hasOwn(INTERACTIONS, data.objectId)) {
-      const result = game.interact(session.player.id, data.objectId);
+      const result = data.objectId.startsWith("arena-")
+        ? game.interactArena(session.player.id, data.objectId)
+        : game.interact(session.player.id, data.objectId);
       if (!result.ok)
         error(session.socket, result.code, result.message, "interaction");
       return;

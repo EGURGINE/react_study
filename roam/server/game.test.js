@@ -22,9 +22,12 @@ import {
   LAP_REWARD,
   CRATE_COST,
   DUPLICATE_REFUND,
+  ITEMS,
   DUEL_TRACK,
   DUEL_LENGTH,
   duelStart,
+  duelPoint,
+  projectDuel,
 } from "../src/gameConfig.js";
 import {
   createDuelObstacles,
@@ -75,14 +78,12 @@ function fixture(t, options = {}) {
     }
   }
   function duel(engine, player) {
-    const x = player.x;
-    for (let step = 0; step <= 60; step += 1) {
+    const offset = projectDuel(player.x, player.z).lateralOffset;
+    for (let step = 0; step <= 240; step += 1) {
       advance(100);
       Object.assign(player, {
-        x,
+        ...duelPoint(step / 240, offset),
         y: 0,
-        z: DUEL_TRACK.startZ - (DUEL_LENGTH * step) / 60,
-        heading: Math.PI,
       });
       engine.onMove(player.id, player);
     }
@@ -147,16 +148,18 @@ test("opaque identity persists earned coins and cosmetics while nicknames remain
   );
 });
 
-test("rarity boundaries implement 75/20/4/1 and exclude starter items", () => {
+test("rarity boundaries implement 74.5/20/4/1/0.5 and exclude starter items", () => {
   for (const [value, expected] of [
     [0, "common"],
-    [0.7499999, "common"],
-    [0.75, "rare"],
-    [0.9499999, "rare"],
-    [0.95, "epic"],
-    [0.9899999, "epic"],
-    [0.99, "legendary"],
-    [0.9999999, "legendary"],
+    [0.7449999, "common"],
+    [0.745, "rare"],
+    [0.9449999, "rare"],
+    [0.945, "epic"],
+    [0.9849999, "epic"],
+    [0.985, "legendary"],
+    [0.9949999, "legendary"],
+    [0.995, "mythic"],
+    [0.9999999, "mythic"],
   ]) {
     let call = 0;
     const item = drawItem(() => (call++ ? 0.99999 : value));
@@ -167,40 +170,75 @@ test("rarity boundaries implement 75/20/4/1 and exclude starter items", () => {
     assert.throws(() => drawItem(() => value), RangeError);
 });
 
-test("straight duel requires the whole course, valid timing, and in-bounds forward checkpoints", () => {
+test("outer duel rejects warps, inner shortcuts, reverse laps, start oscillation, and impossible timing", () => {
   const start = duelStart(0);
   const jumped = createDuelTracker(start, 0);
-  assert.equal(
-    advanceDuel(jumped, { ...start, z: DUEL_TRACK.finishZ }, 10000),
-    false,
-  );
+  assert.equal(advanceDuel(jumped, duelPoint(0.5), 10000), false);
   assert.equal(jumped.valid, false);
   const outside = createDuelTracker(start, 0);
-  assert.equal(advanceDuel(outside, { ...start, x: -26, z: 17 }, 100), false);
+  assert.equal(advanceDuel(outside, { x: 0, z: 10 }, 100), false);
   assert.equal(outside.valid, false);
-  const rushed = createDuelTracker(start, 0);
-  for (let step = 1; step <= 60; step += 1) {
+  const shortcut = createDuelTracker(start, 0);
+  for (let step = 1; step <= 14; step += 1)
+    advanceDuel(shortcut, duelPoint(step / 100, -1.25), step * 200);
+  assert.equal(shortcut.valid, true);
+  assert.equal(advanceDuel(shortcut, duelPoint(0.26, -1.25), 5800), false);
+  assert.equal(
+    shortcut.valid,
+    false,
+    "a curve chord through the empty infield cannot skip the road",
+  );
+  const oscillating = createDuelTracker(start, 0);
+  for (let step = 1; step <= 300; step += 1)
     assert.equal(
-      advanceDuel(rushed, { ...start, z: 18 - (42 * step) / 60 }, step * 10),
+      advanceDuel(
+        oscillating,
+        duelPoint(step % 2 ? 0.003 : -0.003, -1.25),
+        step * 100,
+      ),
+      false,
+    );
+  assert.ok(oscillating.progress < 0.01);
+  const reverse = createDuelTracker(start, 0);
+  for (let step = 1; step <= 240; step += 1)
+    assert.equal(
+      advanceDuel(reverse, duelPoint(-step / 240, -1.25), step * 80),
+      false,
+    );
+  assert.equal(reverse.progress, 0);
+  const rushed = createDuelTracker(start, 0);
+  for (let step = 1; step <= 240; step += 1) {
+    assert.equal(
+      advanceDuel(rushed, duelPoint(step / 240, -1.25), step * 10),
       false,
     );
   }
-  const valid = createDuelTracker(start, 3000);
-  assert.equal(advanceDuel(valid, { ...start, z: 17 }, 2000), false);
-  let finishes = 0;
-  for (let step = 0; step <= 60; step += 1) {
-    if (
-      advanceDuel(
-        valid,
-        { ...start, z: 18 - (42 * step) / 60 },
-        3000 + step * 100,
-      )
-    )
-      finishes += 1;
+  assert.equal(rushed.valid, false);
+});
+
+test("outer duel completes exactly one forward loop in either lane despite small collision backtracking", () => {
+  for (const offset of [-DUEL_TRACK.laneOffset, DUEL_TRACK.laneOffset]) {
+    const valid = createDuelTracker(duelPoint(0, offset), 3000);
+    assert.equal(advanceDuel(valid, duelPoint(0.01, offset), 2000), false);
+    let finishes = 0;
+    let time = 3000;
+    for (let step = 1; step <= 240; step += 1) {
+      time += 80;
+      if (advanceDuel(valid, duelPoint(step / 240, offset), time))
+        finishes += 1;
+      if (step === 100) {
+        const before = valid.progress;
+        advanceDuel(valid, duelPoint(99 / 240, offset), (time += 80));
+        assert.ok(valid.progress < before);
+        advanceDuel(valid, duelPoint(100 / 240, offset), (time += 80));
+      }
+      if (step < 240) assert.equal(finishes, 0);
+    }
+    assert.equal(finishes, 1);
+    assert.equal(valid.checkpoint, 17);
+    assert.ok(Math.abs(valid.progress - 1) < 1e-8);
+    assert.equal(advanceDuel(valid, duelPoint(0, offset), time + 1000), false);
   }
-  assert.equal(finishes, 1);
-  assert.equal(valid.checkpoint, 9);
-  assert.equal(valid.progress, 1);
 });
 
 test("lap rewards require ordered checkpoints, travel, and elapsed time; backtracking cannot farm starts", (t) => {
@@ -435,7 +473,7 @@ test("race creation and joining reserve both stakes, lock the countdown, then pa
   assert.equal(joined.race.status, "countdown");
   assert.equal(host.player.x, duelStart(0).x);
   assert.equal(guest.player.x, duelStart(1).x);
-  assert.equal(host.player.z, DUEL_TRACK.startZ);
+  assert.equal(host.player.z, duelStart(0).z);
   assert.ok(!Object.hasOwn(joined.race, "returnPoses"));
   assert.ok(!Object.hasOwn(room.game.snapshotRaces()[0], "returnPoses"));
   assert.equal(room.game.isLocked(host.player.id), true);
@@ -477,6 +515,98 @@ test("race creation and joining reserve both stakes, lock the countdown, then pa
     room.game.profile(host.player.id).coins +
       room.game.profile(guest.player.id).coins,
     200,
+  );
+});
+
+test("owned body swaps lock throughout race participation while other slots and post-race swaps remain available", (t) => {
+  const rolls = [];
+  const room = fixture(t, { random: () => (rolls.length ? rolls.shift() : 0) });
+  const host = room.attach();
+  const guest = room.attach();
+  room.laps(room.game, host.player, 16);
+  room.laps(room.game, guest.player, 6);
+  const body = room.action(room.game, host.player, "crate").item;
+  room.action(room.game, guest.player, "crate");
+  assert.equal(body.type, "body");
+  const common = ITEMS.filter(
+    (item) => item.rarity === "common" && !item.starter,
+  );
+  const decorations = ["trail", "spray"].map((type) => {
+    const item = common.find((candidate) => candidate.type === type);
+    rolls.push(0, (common.indexOf(item) + 0.5) / common.length);
+    assert.equal(room.action(room.game, host.player, "crate").item.id, item.id);
+    return item;
+  });
+  room.advance(1000);
+  const created = room.action(room.game, host.player, "race:create", {
+    stake: 20,
+  });
+  function locked(peer) {
+    const before = room.game.profile(peer.player.id);
+    const change = room.action(room.game, peer.player, "equip", {
+      itemId: body.id,
+    });
+    assert.equal(change.code, "race_body_locked");
+    assert.match(change.message, /차체/);
+    assert.deepEqual(room.game.profile(peer.player.id), before);
+    assert.deepEqual(peer.player.cosmetics, before.equipped);
+    const choices =
+      peer === host
+        ? [
+            STARTER_EQUIPPED.body,
+            ...decorations.map((item) =>
+              before.equipped[item.type] === item.id
+                ? STARTER_EQUIPPED[item.type]
+                : item.id,
+            ),
+          ]
+        : Object.values(STARTER_EQUIPPED);
+    for (const itemId of choices)
+      assert.equal(
+        room.action(room.game, peer.player, "equip", { itemId }).ok,
+        true,
+      );
+    room.advance(1000);
+  }
+  locked(host); // Waiting host already committed to its vehicle.
+  assert.equal(
+    room.action(room.game, guest.player, "race:join", {
+      raceId: created.race.id,
+    }).ok,
+    true,
+  );
+  locked(host);
+  locked(guest);
+  room.advance(3000);
+  room.game.tick();
+  assert.equal(room.game.snapshotRaces()[0].status, "racing");
+  locked(host);
+  locked(guest);
+  assert.equal(room.action(room.game, guest.player, "race:leave").ok, true);
+  for (const peer of [host, guest]) {
+    const equipped = room.action(room.game, peer.player, "equip", {
+      itemId: body.id,
+    });
+    assert.equal(equipped.ok, true);
+    assert.equal(equipped.profile.equipped.body, body.id);
+    assert.equal(peer.player.cosmetics.body, body.id);
+  }
+  assert.equal(
+    room.action(room.game, host.player, "race:create", { stake: 20 }).ok,
+    true,
+  );
+  assert.equal(
+    room.action(room.game, host.player, "equip", {
+      itemId: STARTER_EQUIPPED.body,
+    }).code,
+    "race_body_locked",
+  );
+  assert.equal(room.action(room.game, host.player, "race:cancel").ok, true);
+  assert.equal(
+    room.action(room.game, host.player, "equip", {
+      itemId: STARTER_EQUIPPED.body,
+    }).ok,
+    true,
   );
 });
 
@@ -524,7 +654,7 @@ test("race cancellation, forfeits, and timeout refunds conserve reserved coins",
   room.action(room.game, rejoined.player, "race:join", {
     raceId: timeout.race.id,
   });
-  room.advance(123001);
+  room.advance(183001);
   room.game.tick();
   assert.equal(host.player.z, trackPoint(0).z);
   assert.equal(rejoined.player.z, trackPoint(0).z);
@@ -572,7 +702,7 @@ test("duel obstacles belong to one race and validate participant, start, positio
   );
   const first = obstacles.find((item) => item.lane === 0);
   const mirrored = obstacles.find(
-    (item) => item.lane === 1 && item.z === first.z,
+    (item) => item.lane === 1 && item.progress === first.progress,
   );
   assert.equal(
     room.game.interact(host.player.id, first.id).code,
@@ -700,7 +830,7 @@ test("one physical duel course admits only one active race without charging bloc
     assert.equal(refused.code, "course_busy");
     assert.equal(
       refused.message,
-      "직선 코스에서 다른 대결이 진행 중이에요. 끝난 뒤 참가해 주세요.",
+      "외곽 코스에서 다른 대결이 진행 중이에요. 끝난 뒤 참가해 주세요.",
     );
     assert.equal(refused.profile.coins, 20);
     assert.equal(room.game.profile(nextHost.player.id).coins, 0); // Only its original host escrow exists.
@@ -871,8 +1001,8 @@ test("WebSocket joins expose only public cosmetics, persist resume tokens, and a
   assert.equal((await refusing).code, "identity_in_use");
 });
 
-test("real WebSocket duel drives both lanes, pays only the pot, and restores participants without stale-move warnings", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "roam-straight-socket-"));
+test("real WebSocket outer duel drives a full loop in both lanes, pays only the pot, and restores participants without stale-move warnings", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "roam-circuit-socket-"));
   let seedTime = 1_700_000_000_000;
   const seed = createGameEngine({ directory, now: () => seedTime });
   const tokens = [];
@@ -917,7 +1047,7 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
       profile: null,
     };
     peers.push(peer);
-    peer.wait = (predicate) => {
+    peer.wait = (predicate, timeout = 10000) => {
       const index = peer.queue.findIndex(predicate);
       if (index >= 0) return Promise.resolve(peer.queue.splice(index, 1)[0]);
       const promise = new Promise((resolve, reject) => {
@@ -926,8 +1056,8 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
           peer.waiters = peer.waiters.filter(
             (candidate) => candidate !== waiter,
           );
-          reject(new Error("Expected straight duel packet did not arrive"));
-        }, 10000);
+          reject(new Error("Expected outer duel packet did not arrive"));
+        }, timeout);
         peer.waiters.push(waiter);
       });
       promise.catch(() => {});
@@ -958,7 +1088,7 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
     socket.send(
       JSON.stringify({
         type: "join",
-        nickname: `Straight ${index}`,
+        nickname: `Circuit ${index}`,
         token: tokens[index],
       }),
     );
@@ -998,7 +1128,7 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
     peers.map((peer) =>
       peer.wait(
         (packet) =>
-          packet.type === "teleport" && packet.player.z === DUEL_TRACK.startZ,
+          packet.type === "teleport" && packet.player.z === duelStart(0).z,
       ),
     ),
   );
@@ -1006,10 +1136,14 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
   assert.equal(guest.player.x, duelStart(1).x);
   // Countdown attempts are ignored, without moving or generating warnings.
   host.socket.send(
-    JSON.stringify({ type: "move", ...duelStart(0), z: 15, y: 0 }),
+    JSON.stringify({
+      type: "move",
+      ...duelPoint(0.01, -DUEL_TRACK.laneOffset),
+      y: 0,
+    }),
   );
   await new Promise((resolve) => setTimeout(resolve, 150));
-  assert.equal(host.player.z, DUEL_TRACK.startZ);
+  assert.equal(host.player.z, duelStart(0).z);
   await host.wait(
     (packet) =>
       packet.type === "race:state" &&
@@ -1020,13 +1154,14 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
   const finished = host.wait(
     (packet) =>
       packet.type === "race:finish" && packet.result.raceId === created.race.id,
+    35000,
   );
   const activated = new Set();
   let lastJumpStep = -100;
-  for (let step = 0; step <= 60; step += 1) {
+  for (let step = 0; step <= 240; step += 1) {
     if (step) await new Promise((resolve) => setTimeout(resolve, 80));
-    const progress = step / 60;
-    const z = DUEL_TRACK.startZ - DUEL_LENGTH * progress;
+    const progress = step / 240;
+    const pose = duelPoint(progress, -DUEL_TRACK.laneOffset);
     const airStep = step - lastJumpStep;
     const y =
       airStep > 0 && airStep < 10
@@ -1035,8 +1170,7 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
     host.socket.send(
       JSON.stringify({
         type: "move",
-        ...duelStart(0),
-        z,
+        ...pose,
         y,
       }),
     );
@@ -1044,7 +1178,7 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
       (item) =>
         item.lane === 0 &&
         !activated.has(item.id) &&
-        Math.abs(item.z - z) < 1.4 &&
+        Math.hypot(item.x - pose.x, item.z - pose.z) < 1.4 &&
         y === 0,
     );
     if (obstacle) {
@@ -1062,12 +1196,11 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
       lastJumpStep = step;
     }
     // The slower rival also moves, proving both independent lanes are accepted.
-    if (step < 60)
+    if (step < 240)
       guest.socket.send(
         JSON.stringify({
           type: "move",
-          ...duelStart(1),
-          z: DUEL_TRACK.startZ - DUEL_LENGTH * progress * 0.8,
+          ...duelPoint(progress * 0.8, DUEL_TRACK.laneOffset),
           y: 0,
         }),
       );
@@ -1081,7 +1214,11 @@ test("real WebSocket duel drives both lanes, pays only the pot, and restores par
   // Model one rival movement packet already in flight when the server restored
   // the cars. It must not flash a correction or move the player back to the duel.
   guest.socket.send(
-    JSON.stringify({ type: "move", ...duelStart(1), z: -15, y: 0 }),
+    JSON.stringify({
+      type: "move",
+      ...duelPoint(0.8, DUEL_TRACK.laneOffset),
+      y: 0,
+    }),
   );
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(host.profile.coins, 40);

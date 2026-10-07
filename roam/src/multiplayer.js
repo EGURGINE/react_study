@@ -19,6 +19,9 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     [profile, setProfile] = useState(null),
     [races, setRaces] = useState([]),
     [raceResult, setRaceResult] = useState(null),
+    [arenas, setArenas] = useState([]),
+    [arenaResult, setArenaResult] = useState(null),
+    [arenaHonors, setArenaHonors] = useState(null),
     [latestLap, setLatestLap] = useState(null),
     [lapProgress, setLapProgress] = useState({ active: false, progress: 0 }),
     [gameBusy, setGameBusy] = useState(false);
@@ -55,6 +58,8 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         setLapProgress({ active: false, progress: 0 });
         setRaces([]);
         setRaceResult(null);
+        setArenas([]);
+        setArenaResult(null);
         clearGames();
         const base = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
         const url =
@@ -123,6 +128,8 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             setPlayer(data.player);
             setProfile(data.profile || null);
             setRaces(data.races || []);
+            setArenas(data.arenas || []);
+            if (data.arenaHonors) setArenaHonors(data.arenaHonors);
             if (typeof data.resumeToken === "string") {
               try {
                 localStorage.setItem("roam-player-token-v1", data.resumeToken);
@@ -177,6 +184,18 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             }
           }
           if (data.type === "race:state") setRaces(data.races || []);
+          if (data.type === "arena:state") setArenas(data.arenas || []);
+          if (data.type === "arena:honors") setArenaHonors(data.honors);
+          if (data.type === "arena:finish") {
+            if (data.result?.winnerId) onGameEvent?.(data);
+            if (
+              identity.current &&
+              data.result?.participantIds?.includes(identity.current.id)
+            ) {
+              setArenaResult({ ...data.result, receivedAt: Date.now() });
+              if (data.profile) setProfile(data.profile);
+            }
+          }
           if (
             data.type === "race:finish" &&
             identity.current &&
@@ -191,6 +210,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             if (data.profile) setProfile(data.profile);
           }
           if (data.type === "spray") onGameEvent?.(data);
+          if (data.type === "car:impact") onInteraction?.(data);
           if (data.type === "gallery:new")
             setGalleryVersion((version) => version + 1);
           if (
@@ -273,6 +293,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
           clearGames();
           setProfile(null);
           setRaces([]);
+          setArenas([]);
           setPhotos({});
           setLapProgress({ active: false, progress: 0 });
           travelPending.current = false;
@@ -324,6 +345,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     setPlayer(null);
     setPeers([]);
     setConnected(false);
+    setArenas([]);
   }, []);
   const teleport = useCallback((destination) => {
     if (socket.current?.readyState === WebSocket.OPEN && identity.current) {
@@ -439,6 +461,11 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         (race) => race.hostId === player?.id || race.guestId === player?.id,
       ) || null
     : null;
+  const currentArena = player
+    ? arenas.find((arena) =>
+        arena.players?.some((participant) => participant.id === player.id),
+      ) || null
+    : null;
   return {
     configured,
     player,
@@ -465,6 +492,10 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     races,
     currentRace,
     raceResult,
+    arenas,
+    currentArena,
+    arenaResult,
+    arenaHonors,
     latestLap,
     lapProgress,
     gameBusy,

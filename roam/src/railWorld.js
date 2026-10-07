@@ -8,13 +8,15 @@ import {
   CRATE_COST,
 } from "./gameConfig.js";
 
-export function createRailWorld(scene) {
+export function createRailWorld(scene, { reducedMotion = false } = {}) {
   const root = new THREE.Group();
   root.name = "loop-railway";
   scene.add(root);
   const materials = new Map();
   const neonMaterials = [];
   let night = 0;
+  let lastElapsed = 0;
+  let rewardStartedAt = -Infinity;
   function neon(dayColor, lightColor, peak) {
     const material = new THREE.MeshStandardMaterial({
       color: dayColor,
@@ -226,25 +228,65 @@ export function createRailWorld(scene) {
     11,
     3.6,
   );
-  for (const x of [-9.6, 9.6]) {
-    const coin = mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 0.13, 16),
-      "#e8c967",
-      root,
-      x,
-      0.7,
-      34,
-    );
+  const coinMaterial = new THREE.MeshStandardMaterial({
+    color: "#ffd24f",
+    emissive: "#ffce24",
+    emissiveIntensity: 1.05,
+    roughness: 0.5,
+    metalness: 0.12,
+  });
+  const coinRimMaterial = new THREE.MeshStandardMaterial({
+    color: "#fff0a0",
+    emissive: "#ffe46a",
+    emissiveIntensity: 1.25,
+    roughness: 0.6,
+  });
+  const coinGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.13, 24);
+  const coinRimGeometry = new THREE.TorusGeometry(0.38, 0.027, 6, 32);
+  const coinMarkGeometry = new THREE.BoxGeometry(0.072, 0.018, 0.35);
+  const coins = [];
+  for (const [index, x] of [-9.6, 9.6].entries()) {
+    const floating = new THREE.Group();
+    floating.name = `rail-reward-coin-${index}`;
+    floating.position.set(x, 1.75, 34);
+    floating.scale.setScalar(2.3);
+    root.add(floating);
+    const coin = mesh(coinGeometry, coinMaterial, floating);
+    coin.name = "rail-reward-coin-body";
     coin.rotation.x = Math.PI / 2;
-    mesh(
-      new THREE.TorusGeometry(0.34, 0.034, 6, 24),
-      "#fff0b1",
-      coin,
-      0,
-      0.076,
-      0,
-    ).rotation.x = Math.PI / 2;
+    for (const side of [-1, 1]) {
+      const rim = mesh(
+        coinRimGeometry,
+        coinRimMaterial,
+        coin,
+        0,
+        side * 0.076,
+        0,
+      );
+      rim.rotation.x = Math.PI / 2;
+      mesh(coinMarkGeometry, coinRimMaterial, coin, 0, side * 0.077, 0);
+    }
+    coins.push(floating);
     box(1.25, 0.19, 1.25, "#c3bf95", root, x, 0.11, 34);
+  }
+
+  function animateCoins(elapsed) {
+    const age = elapsed - rewardStartedAt;
+    const pulse = age >= 0 && age < 1 ? Math.sin(age * Math.PI) ** 2 : 0;
+    coinMaterial.emissiveIntensity = 1.05 + night * 1.65 + pulse * 0.7;
+    coinRimMaterial.emissiveIntensity = 1.25 + night * 1.8 + pulse * 0.85;
+    const bob = reducedMotion
+      ? 0
+      : Math.sin((elapsed % ((Math.PI * 2) / 1.25)) * 1.25) * 0.27;
+    const rotation = reducedMotion
+      ? 0
+      : (elapsed % ((Math.PI * 2) / 0.32)) * 0.32;
+    const scale = 2.3 * (1 + (reducedMotion ? 0 : pulse * 0.1));
+    for (const coin of coins) {
+      coin.position.y = 1.75 + bob;
+      coin.rotation.y = rotation;
+      coin.scale.setScalar(scale);
+    }
   }
 
   return {
@@ -252,10 +294,19 @@ export function createRailWorld(scene) {
       night = Number.isFinite(value) ? THREE.MathUtils.clamp(value, 0, 1) : 0;
       for (const entry of neonMaterials)
         entry.material.emissiveIntensity = 0.025 + night * (entry.peak - 0.025);
+      animateCoins(lastElapsed);
     },
     getBumpers: () => [],
     hitBumper: () => null,
     playBumper() {},
-    update() {},
+    reward(elapsed = lastElapsed) {
+      rewardStartedAt =
+        Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : lastElapsed;
+      animateCoins(lastElapsed);
+    },
+    update(_dt, elapsed) {
+      if (Number.isFinite(elapsed) && elapsed >= 0) lastElapsed = elapsed;
+      animateCoins(lastElapsed);
+    },
   };
 }

@@ -10,7 +10,7 @@
     "server": "node server/index.js",
     "host:pc": "node scripts/host-pc.mjs",
     "start": "node server/index.js",
-    "test": "node --test server/index.test.js server/game.test.js src/navigation.test.js src/railNavigation.test.js src/attractions.test.js src/gameConfig.test.js src/dayCycle.test.js src/cosmeticsCatalog.test.js src/nightLights.test.js src/duelObstacles.test.js src/duelWorld.test.js",
+    "test": "node --test server/index.test.js server/game.test.js server/arena.test.js src/navigation.test.js src/railNavigation.test.js src/railWorld.test.js src/attractions.test.js src/gameConfig.test.js src/dayCycle.test.js src/cosmeticsCatalog.test.js src/nightLights.test.js src/duelObstacles.test.js src/duelWorld.test.js src/arenaConfig.test.js src/arenaWorld.test.js src/arenaCelebration.test.js src/arenaHonors.test.js src/carCollisions.test.js src/vehicleDynamics.test.js",
     "dev:all": "node scripts/local.mjs"
   },
   "dependencies": {

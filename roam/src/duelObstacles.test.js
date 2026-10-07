@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DUEL_TRACK, projectDuel } from "./gameConfig.js";
+import {
+  DUEL_TRACK,
+  DUEL_LENGTH,
+  duelPoint,
+  projectDuel,
+} from "./gameConfig.js";
 import {
   createDuelObstacles,
   DUEL_OBSTACLE_RULES,
@@ -13,11 +18,11 @@ test("seeded duel layouts are stable, race-scoped, mirrored, and leave both ends
   for (let seed = 0; seed < 64; seed += 1) {
     const layout = createDuelObstacles(seed, "race-one");
     assert.deepEqual(layout, createDuelObstacles(seed, "race-one"));
-    assert.ok([6, 8].includes(layout.length));
+    assert.ok([16, 18, 20].includes(layout.length));
     assert.equal(new Set(layout.map((item) => item.id)).size, layout.length);
     assert.deepEqual(
       new Set(layout.map((item) => item.kind)),
-      new Set(["jump", "bounce"]),
+      new Set(["jump", "bounce", "boost"]),
     );
     counts.add(layout.length);
     patterns.add(JSON.stringify(layout));
@@ -25,19 +30,25 @@ test("seeded duel layouts are stable, race-scoped, mirrored, and leave both ends
       const [left, right] = layout.slice(index, index + 2);
       assert.equal(left.lane, 0);
       assert.equal(right.lane, 1);
-      assert.equal(left.z, right.z);
+      assert.equal(left.progress, right.progress);
+      assert.equal(left.heading, right.heading);
       assert.equal(left.kind, right.kind);
-      assert.ok(Math.abs(left.x + right.x - 2 * DUEL_TRACK.cx) < 1e-10);
-      assert.ok(DUEL_TRACK.startZ - left.z - left.r >= 6);
-      assert.ok(left.z - DUEL_TRACK.finishZ - left.r >= 6);
+      const center = duelPoint(left.progress);
+      assert.ok(Math.abs(left.x + right.x - 2 * center.x) < 1e-10);
+      assert.ok(Math.abs(left.z + right.z - 2 * center.z) < 1e-10);
+      assert.ok(left.progress * DUEL_LENGTH - left.r >= 8);
+      assert.ok((1 - left.progress) * DUEL_LENGTH - left.r >= 8);
       assert.ok(
-        Math.abs(left.x - DUEL_TRACK.cx) + left.r < DUEL_TRACK.halfWidth,
+        projectDuel(left.x, left.z).distance + left.r < DUEL_TRACK.halfWidth,
       );
       assert.equal(projectDuel(left.x, left.z).inside, true);
-      if (index > 0) assert.ok(layout[index - 2].z - left.z > 6);
+      if (index > 0)
+        assert.ok(
+          (left.progress - layout[index - 2].progress) * DUEL_LENGTH > 15,
+        );
     }
   }
-  assert.equal(counts.size, 2);
+  assert.equal(counts.size, 3);
   assert.equal(patterns.size, 64);
   const first = createDuelObstacles(123, "race-one");
   const next = createDuelObstacles(123, "race-two");
@@ -50,6 +61,9 @@ test("seeded duel layouts are stable, race-scoped, mirrored, and leave both ends
 
 test("obstacle physics stays inside existing movement limits and rejects malformed seeds", () => {
   assert.ok(DUEL_OBSTACLE_RULES.bounce.speed < DUEL_MOVEMENT_LIMITS.maxSpeed);
+  assert.ok(DUEL_OBSTACLE_RULES.boost.speed < DUEL_MOVEMENT_LIMITS.maxSpeed);
+  assert.equal(DUEL_OBSTACLE_RULES.boost.jumpVelocity, 0);
+  assert.equal(DUEL_OBSTACLE_RULES.boost.duration, 1.5);
   assert.ok(
     DUEL_OBSTACLE_RULES.jump.jumpVelocity ** 2 / (2 * 12) <
       DUEL_MOVEMENT_LIMITS.maxHeight,

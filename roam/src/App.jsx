@@ -34,15 +34,51 @@ import {
   Moon,
   Sunrise,
   Sunset,
+  Trophy,
+  History,
+  Eye,
 } from "lucide-react";
 import { createWorld, ZONES } from "./world.js";
 import { useMultiplayer } from "./multiplayer.js";
 import { preparePhoto } from "./photos.js";
 import { useGallery } from "./gallery.js";
-import { GaragePanel, RacePanel, RaceHud, Wallet } from "./GamePanels.jsx";
-import { LAP_REWARD } from "./gameConfig.js";
+import { useArenaHonors } from "./arenaHonors.js";
+import { ArenaChampion, ArenaHonorsPanel } from "./ArenaHonors.jsx";
+import {
+  GaragePanel,
+  ArenaPanel,
+  ArenaHud,
+  RacePanel,
+  RaceHud,
+  Wallet,
+} from "./GamePanels.jsx";
+import { LAP_REWARD, DUEL_TRACK, duelPoint, ITEM_BY_ID } from "./gameConfig.js";
+import { ARENA } from "./arenaConfig.js";
 import "./game.css";
 import "./lighting.css";
+
+const TIME_CONTROL_KEY = "roam-time-control-v1";
+function initialTimeControl() {
+  if (import.meta.env.DEV) {
+    const preview = new URLSearchParams(window.location.search).get("time");
+    const time = { day: 0, sunset: 150, night: 300 }[preview];
+    if (typeof time === "number") return { automatic: false, time };
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(TIME_CONTROL_KEY));
+    if (
+      typeof saved?.automatic === "boolean" &&
+      typeof saved.time === "number" &&
+      Number.isFinite(saved.time) &&
+      saved.time >= 0 &&
+      saved.time <= 300
+    )
+      return { automatic: saved.automatic, time: saved.time };
+  } catch {
+    // A blocked or invalid preference falls back to the normal island clock.
+  }
+  return { automatic: true, time: 0 };
+}
 
 const photoDate = (value) =>
   new Intl.DateTimeFormat("ko-KR", {
@@ -97,7 +133,7 @@ function Modal({ section, onClose, children }) {
     if (section === "work") {
       ref.current.scrollTop =
         previousSection.current === "photo" ? galleryScroll.current : 0;
-    } else if (section === "photo") {
+    } else if (section === "photo" || section === "honors") {
       ref.current.scrollTop = 0;
     }
     previousSection.current = section;
@@ -135,26 +171,99 @@ function Modal({ section, onClose, children }) {
   );
 }
 
-function MiniMap({ state, onSelect, large = false, peers = [] }) {
+const mapPoint = ({ x, z }) => ({ x: 100 + x * 3.45, y: 75 + z * 2.5 });
+const mapCircuit = (offset) =>
+  Array.from({ length: 160 }, (_, index) =>
+    mapPoint(duelPoint(index / 160, offset)),
+  );
+const mapPath = (points) =>
+  points
+    .map(
+      (point, index) =>
+        `${index ? "L" : "M"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
+    )
+    .join(" ") + "Z";
+const circuitOuter = mapCircuit(DUEL_TRACK.halfWidth);
+const circuitInner = mapCircuit(-DUEL_TRACK.halfWidth);
+const circuitStart = [
+  mapPoint(duelPoint(0, -DUEL_TRACK.halfWidth)),
+  mapPoint(duelPoint(0, DUEL_TRACK.halfWidth)),
+];
+const arenaMapCenter = mapPoint({ x: ARENA.cx, z: ARENA.cz });
+const circuitBoundary = {
+  left:
+    Math.min(
+      ...circuitOuter.map((point) => point.x),
+      arenaMapCenter.x - ARENA.maxRadius * 3.45,
+    ) - 10,
+  top:
+    Math.min(
+      ...circuitOuter.map((point) => point.y),
+      arenaMapCenter.y - ARENA.maxRadius * 2.5,
+    ) - 10,
+  right: Math.max(...circuitOuter.map((point) => point.x)) + 10,
+  bottom: Math.max(...circuitOuter.map((point) => point.y)) + 10,
+};
+const mapViewBox = `${circuitBoundary.left} ${circuitBoundary.top} ${circuitBoundary.right - circuitBoundary.left} ${circuitBoundary.bottom - circuitBoundary.top}`;
+const circuitOutlinePath = `${mapPath(circuitOuter)} ${mapPath(circuitInner)}`;
+const circuitCenterPath = mapPath(mapCircuit(0));
+const circuitStartPath = `M${circuitStart[0].x} ${circuitStart[0].y}L${circuitStart[1].x} ${circuitStart[1].y}`;
+
+function MiniMap({ state, onSelect, large = false, peers = [], arena = null }) {
+  const arenaRadius = arena?.radius || ARENA.minRadius;
   return (
     <div className={`minimap ${large ? "large-map" : ""}`}>
       <svg
-        viewBox="-30 0 230 190"
-        aria-label="우리 아지트와 아래 순환 레일, 왼쪽 직선 대결 코스 지도, 자동차 위치"
+        viewBox={mapViewBox}
+        aria-label="우리 아지트와 아래 순환 레일, 왼쪽 위 콜로세움과 자동차 위치"
       >
-        <rect x="-21" y="7" width="28" height="124" rx="5" fill="#879b97" />
+        <ellipse
+          cx={arenaMapCenter.x}
+          cy={arenaMapCenter.y}
+          rx={arenaRadius * 3.45}
+          ry={arenaRadius * 2.5}
+          fill="#dfccb0"
+          stroke="#ab8d70"
+          strokeWidth="3"
+        />
+        <ellipse
+          cx={arenaMapCenter.x}
+          cy={arenaMapCenter.y}
+          rx={(arenaRadius - 1.5) * 3.45}
+          ry={(arenaRadius - 1.5) * 2.5}
+          fill="none"
+          stroke="#f9efda"
+          strokeWidth="1.5"
+          strokeDasharray="5 4"
+        />
+        <text
+          x={arenaMapCenter.x}
+          y={arenaMapCenter.y + 3}
+          fill="#79634f"
+          fontSize="9"
+          textAnchor="middle"
+        >
+          콜로세움
+        </text>
         <path
-          d="M-7 17V123"
+          d={circuitOutlinePath}
+          fillRule="evenodd"
+          fill="#b6c1a6"
+          stroke="#9aa98c"
+          strokeWidth="0.7"
+        />
+        <path
+          d={circuitCenterPath}
+          fill="none"
           stroke="#e5eddb"
           strokeWidth="1"
           strokeDasharray="4 4"
         />
-        <path d="M-21 120H7" stroke="#f5edc4" strokeWidth="3" />
-        <path d="M-21 15H7" stroke="#f8f8ed" strokeWidth="5" />
+        <path d={circuitStartPath} stroke="#f8f8ed" strokeWidth="4" />
         <path
-          d="M-18 15H4"
+          d={circuitStartPath}
           stroke="#435b53"
-          strokeWidth="5"
+          strokeWidth="4"
           strokeDasharray="3 3"
         />
         <path d="M100 120V149" fill="none" stroke="#e0d8bf" strokeWidth="15" />
@@ -208,14 +317,14 @@ function MiniMap({ state, onSelect, large = false, peers = [] }) {
         {peers.map((p) => (
           <circle
             key={p.id}
-            cx={100 + p.x * 3.45}
-            cy={75 + p.z * 2.5}
+            cx={mapPoint(p).x}
+            cy={mapPoint(p).y}
             r="3"
             fill={p.color}
           />
         ))}
         <g
-          transform={`translate(${100 + (state.x || 0) * 3.45},${75 + (state.z || 0) * 2.5}) rotate(${(-(state.heading || 0) * 180) / Math.PI})`}
+          transform={`translate(${mapPoint({ x: state.x || 0, z: state.z || 0 }).x},${mapPoint({ x: state.x || 0, z: state.z || 0 }).y}) rotate(${(-(state.heading || 0) * 180) / Math.PI})`}
         >
           <circle r="7" fill="#f9fff2" opacity=".75" />
           <path d="M0 5L-4-4L0-2L4-4Z" fill="#315e47" />
@@ -233,6 +342,13 @@ function MiniMap({ state, onSelect, large = false, peers = [] }) {
             <MapPin size={16} />
           </button>
         ))}
+      {large && !ZONES.some((zone) => zone.id === "arena") && (
+        <button className="map-destination" onClick={() => onSelect("arena")}>
+          <span style={{ background: "#ab8d70" }} />
+          <span>콜로세움 둘러보기</span>
+          <MapPin size={16} />
+        </button>
+      )}
     </div>
   );
 }
@@ -287,12 +403,33 @@ export default function App() {
     [moved, setMoved] = useState(false),
     [ready, setReady] = useState(false),
     [error, setError] = useState(false);
+  const [playMode, setPlayMode] = useState("arena");
   const [chatOpen, setChatOpen] = useState(() => window.innerWidth > 760),
     [draft, setDraft] = useState(""),
     [nickname, setNickname] = useState(""),
     [toast, setToast] = useState("");
   const [photoView, setPhotoView] = useState(null),
     [preparing, setPreparing] = useState(false);
+  const [timeControl, setTimeControl] = useState(initialTimeControl);
+  const [previewVehicle] = useState(() => {
+    if (!import.meta.env.DEV) return null;
+    const item = ITEM_BY_ID.get(
+      new URLSearchParams(window.location.search).get("vehicle"),
+    );
+    return item?.type === "body" ? item : null;
+  });
+  const changeTimeControl = (automatic, time) => {
+    const next = {
+      automatic,
+      time: Math.max(0, Math.min(300, Math.round(time))),
+    };
+    setTimeControl(next);
+    try {
+      localStorage.setItem(TIME_CONTROL_KEY, JSON.stringify(next));
+    } catch {
+      // The current tab still follows the selected time when storage is blocked.
+    }
+  };
   const chatEnd = useRef(null),
     toastTimer = useRef(),
     railAfterJoin = useRef(false);
@@ -311,6 +448,8 @@ export default function App() {
   );
   const receiveGameEvent = useCallback((event) => {
     if (event.type === "spray") world.current?.applySpray(event.spray);
+    if (event.type === "arena:finish" && event.result?.winnerId)
+      world.current?.celebrateArena("winner", event.result.arenaId);
   }, []);
   const multiplayer = useMultiplayer(
     stateRef,
@@ -318,6 +457,20 @@ export default function App() {
     receiveInteraction,
     receiveGameEvent,
   );
+  const arenaDisplay =
+    multiplayer.arenas.find((arena) => arena.status !== "waiting") ||
+    multiplayer.currentArena ||
+    multiplayer.arenas[0] ||
+    null;
+  const arenaHonors = useArenaHonors({
+    ready,
+    open: section === "honors",
+    live: multiplayer.arenaHonors,
+  });
+  const spectatingBlocked =
+    ["countdown", "running"].includes(multiplayer.currentArena?.status) ||
+    Boolean(multiplayer.currentRace);
+  const arenaSpectating = Boolean(state.arenaSpectating) && !spectatingBlocked;
   const gallery = useGallery(
     section === "work" || (section === "photo" && photoView?.archived),
     multiplayer.galleryVersion,
@@ -331,6 +484,7 @@ export default function App() {
           const positions = overlayPositions.current;
           positions.clear();
           positions.set("self", s.car);
+          positions.set("arena", s.arenaMarker);
           for (const label of s.labels)
             positions.set(`zone:${label.id}`, label);
           for (const peer of s.peers) positions.set(`peer:${peer.id}`, peer);
@@ -349,6 +503,7 @@ export default function App() {
         onInteraction: (event) => multiplayer.emitInteraction(event),
         onSpray: () => multiplayer.sprayNow(),
       });
+      world.current.setTimeControl(timeControl);
       setReady(true);
     } catch (e) {
       console.error(e);
@@ -360,6 +515,9 @@ export default function App() {
       clearTimeout(toastTimer.current);
     };
   }, [open, notify, multiplayer.teleport]);
+  useEffect(() => {
+    if (ready) world.current?.setTimeControl(timeControl);
+  }, [ready, timeControl.automatic, timeControl.time]);
   useEffect(() => {
     world.current?.setPaused(
       Boolean(section) ||
@@ -386,6 +544,43 @@ export default function App() {
       setSection(null);
   }, [multiplayer.currentRace?.id, multiplayer.currentRace?.status]);
   useEffect(() => {
+    if (multiplayer.currentRace) setPlayMode("race");
+    else if (multiplayer.currentArena) setPlayMode("arena");
+  }, [multiplayer.currentRace?.id, multiplayer.currentArena?.id]);
+  useEffect(() => {
+    if (ready) world.current?.setArena(multiplayer.currentArena);
+  }, [ready, multiplayer.currentArena]);
+  useEffect(() => {
+    if (ready) world.current?.setArenaDisplay(arenaDisplay);
+  }, [ready, arenaDisplay]);
+  useEffect(() => {
+    if (spectatingBlocked) world.current?.setArenaSpectating(false);
+  }, [spectatingBlocked]);
+  useEffect(() => {
+    if (["countdown", "running"].includes(multiplayer.currentArena?.status))
+      setSection(null);
+  }, [multiplayer.currentArena?.id, multiplayer.currentArena?.status]);
+  useEffect(() => {
+    const result = multiplayer.arenaResult;
+    if (!result) return;
+    if (!result.winnerId)
+      notify(
+        result.reason === "timeout"
+          ? "제한 시간이 끝났어요. 참가비를 돌려받고 아지트로 돌아가요."
+          : result.reason === "server_restart"
+            ? "경기가 종료되어 참가비를 돌려받았어요."
+            : "승자 없이 경기가 끝났어요. 참가비는 모두에게 돌아가요.",
+      );
+    else if (result.winnerId === multiplayer.player?.id)
+      notify(
+        `마지막 한 대로 살아남았어요! ${result.pot}코인을 받고 아지트로 돌아가요. 🏆`,
+      );
+    else
+      notify(
+        `${result.winnerNickname}님이 마지막까지 살아남았어요. 다음 경기에서 다시 만나요!`,
+      );
+  }, [multiplayer.arenaResult]);
+  useEffect(() => {
     const result = multiplayer.raceResult;
     if (!result) return;
     if (!result.winnerId)
@@ -400,8 +595,10 @@ export default function App() {
       );
   }, [multiplayer.raceResult]);
   useEffect(() => {
-    if (multiplayer.latestLap)
+    if (multiplayer.latestLap) {
       notify(`한 바퀴 완주! +${LAP_REWARD}코인을 모았어요. 🪙`);
+      world.current?.rewardLap();
+    }
   }, [multiplayer.latestLap]);
   useEffect(() => {
     if (multiplayer.correction)
@@ -428,11 +625,12 @@ export default function App() {
       setSection(null);
   }, [multiplayer.photos, section, photoView]);
   useEffect(() => {
+    if (previewVehicle) return;
     if (ready && !sessionStorage.getItem("roam-entry-seen")) {
       setSection("join");
       sessionStorage.setItem("roam-entry-seen", "1");
     }
-  }, [ready]);
+  }, [ready, previewVehicle]);
 
   const close = () => {
     if (section === "join") {
@@ -468,6 +666,15 @@ export default function App() {
   }
   function visit(id) {
     const destination = id;
+    if (destination === "arena") {
+      if (spectatingBlocked) {
+        notify("참가 중인 경기가 끝난 뒤 관전할 수 있어요.");
+        return;
+      }
+      world.current?.goTo("arena");
+      setSection(null);
+      return;
+    }
     if (destination === "track" && !multiplayer.connected) {
       railAfterJoin.current = true;
       open("join");
@@ -517,12 +724,29 @@ export default function App() {
   const photoBusy = preparing || multiplayer.uploading;
   const lighting = state.lighting;
   const lightingPhase = lighting?.phase || "day";
+  const lightingLabel = lighting?.label || "낮";
+  const progress = Number.isFinite(lighting?.progress) ? lighting.progress : 0;
+  const sliderTime = timeControl.automatic
+    ? Math.round(
+        Math.max(
+          0,
+          Math.min(300, (progress <= 0.5 ? progress : 1 - progress) * 600),
+        ),
+      )
+    : timeControl.time;
+  const timeDescription = timeControl.automatic
+    ? "5분에 걸쳐 밤으로, 다음 5분에 걸쳐 다시 낮으로 변해요. 한 주기는 10분이에요."
+    : `${lightingLabel}의 시간으로 고정했어요. 자동을 켜면 선택한 시간부터 다시 흘러가요.`;
   const TimeIcon =
     { day: Sun, sunset: Sunset, night: Moon, dawn: Sunrise }[lightingPhase] ||
     Sun;
   const lightingStyle = {
     "--night": lighting?.night || 0,
-    "--sky-color": lighting?.skyColor || "#eeede4",
+    "--sky-color": lighting?.skyColor || "#83a6f5",
+    "--sky-mid": lighting?.skyMidColor || "#2698a5",
+    "--sky-bottom": lighting?.skyBottomColor || "#155f73",
+    "--ui-footer-ink": lighting?.ui?.footerInk || "#e8e7d3",
+    "--ui-footer-muted": lighting?.ui?.footerMuted || "#d5e5e8",
     "--ui-panel": lighting?.ui?.panel || "#f7f7ef",
     "--ui-ink": lighting?.ui?.ink || "#3c523d",
     "--ui-muted": lighting?.ui?.muted || "#89917c",
@@ -534,6 +758,7 @@ export default function App() {
     "--ui-scene-accent": lighting?.ui?.sceneAccent || "#3d6043",
     "--ui-danger": lighting?.ui?.danger || "#a6644e",
   };
+  const testDrive = !multiplayer.player ? previewVehicle : null;
   const photoCards = [
     ...multiplayer.peers
       .filter((p) => multiplayer.photos[p.id])
@@ -611,10 +836,108 @@ export default function App() {
           >
             {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
+          <div
+            className="time-control"
+            role="group"
+            aria-label="아지트 시간 설정"
+          >
+            <div
+              className="time-pill"
+              title={`${lightingLabel} · 해와 달을 끌어 시간을 조절해요`}
+              style={{
+                "--time-progress": sliderTime / 300,
+                "--time-dusk": `${Math.min(1, sliderTime / 150) * 100}%`,
+                "--time-night": Math.max(0, (sliderTime - 150) / 150),
+                "--time-night-blend": `${Math.max(0, (sliderTime - 150) / 150) * 100}%`,
+              }}
+            >
+              <span className="time-pill-night" aria-hidden="true" />
+              <span className="time-pill-halo" aria-hidden="true" />
+              <svg
+                className="time-pill-clouds"
+                viewBox="0 0 184 52"
+                aria-hidden="true"
+              >
+                <path
+                  opacity=".52"
+                  d="M78 52V43a10 10 0 0 1 15-9 14 14 0 0 1 26-3 10 10 0 0 1 16 5 18 18 0 0 1 34-9 12 12 0 0 1 17 7v18Z"
+                />
+                <path d="M107 52V46a10 10 0 0 1 17-7 11 11 0 0 1 21-2 14 14 0 0 1 24-6 10 10 0 0 1 18 4v17Z" />
+                <path
+                  opacity=".7"
+                  d="M90 20a5 5 0 0 1 8-4 7 7 0 0 1 13-2 5 5 0 0 1 7 6Z"
+                />
+              </svg>
+              <svg
+                className="time-pill-stars"
+                viewBox="0 0 184 52"
+                aria-hidden="true"
+              >
+                <path d="m25 11 1.5 4 4 1.5-4 1.5-1.5 4-1.5-4-4-1.5 4-1.5Zm43 16 1.2 3.2 3.2 1.2-3.2 1.2-1.2 3.2-1.2-3.2-3.2-1.2 3.2-1.2Zm29-17 1 2.8 2.8 1-2.8 1-1 2.8-1-2.8-2.8-1 2.8-1Z" />
+                <circle cx="47" cy="10" r="1.15" />
+                <circle cx="42" cy="37" r="1.5" />
+                <circle cx="81" cy="13" r=".9" />
+                <circle cx="106" cy="38" r="1.1" />
+                <circle cx="15" cy="34" r=".85" />
+                <circle cx="116" cy="24" r=".9" />
+              </svg>
+              <span className="time-pill-disc" aria-hidden="true">
+                <span className="time-pill-craters">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </span>
+              <input
+                className="time-pill-input"
+                type="range"
+                min="0"
+                max="300"
+                step="1"
+                value={sliderTime}
+                onChange={(event) =>
+                  changeTimeControl(false, Number(event.target.value))
+                }
+                aria-label="아지트 시간 조절"
+                aria-valuetext={`${lightingLabel} · ${timeControl.automatic ? "자동 진행 중" : "시간 고정"}`}
+              />
+            </div>
+            <button
+              type="button"
+              className="time-auto"
+              aria-pressed={timeControl.automatic}
+              title={
+                timeControl.automatic
+                  ? "현재 시간에 멈추기"
+                  : "선택한 시간부터 자동으로 흐르기"
+              }
+              onClick={() =>
+                changeTimeControl(!timeControl.automatic, sliderTime)
+              }
+            >
+              Auto
+            </button>
+          </div>
         </div>
       </header>
-      <RaceHud race={multiplayer.currentRace} onOpen={() => open("play")} />
-      {!multiplayer.currentRace && (
+      <ArenaHud
+        arena={multiplayer.currentArena}
+        playerId={multiplayer.player?.id}
+        onOpen={() => {
+          setPlayMode("arena");
+          open("play");
+        }}
+      />
+      {!multiplayer.currentArena && (
+        <RaceHud
+          race={multiplayer.currentRace}
+          onOpen={() => {
+            setPlayMode("race");
+            open("play");
+          }}
+        />
+      )}
+      {!multiplayer.currentRace && !multiplayer.currentArena && (
         <button
           className={`rail-status ${moved ? "has-moved" : ""} ${state.track?.onTrack ? "on-track" : ""}`}
           onClick={() =>
@@ -647,28 +970,15 @@ export default function App() {
           )}
         </button>
       )}
-      <section
-        className={`intro ${moved ? "has-moved" : ""}`}
-        aria-label="우리들의 아지트"
-      >
-        <div className="eyebrow">
-          <span className="little-line" /> GOOD COMPANY. NO DESTINATION.
-        </div>
-        <h1>
-          작은 세상,
-          <br />
-          <em>함께라서 좋아.</em>
-        </h1>
-        <p>
-          차를 타고 만나고, 사진과 이야기를 나눠요.
-          <br />
-          오늘도 우리, 여기서 만나요.
-        </p>
-        <div className="intro-note">
-          <MousePointer2 size={17} /> 우클릭으로 가고 싶은 곳을 콕!
-        </div>
-      </section>
       <div className="world-labels" aria-label="함께 놀 곳">
+        {!spectatingBlocked && !arenaSpectating && (
+          <ArenaChampion
+            latest={arenaHonors.honors.latest}
+            anchorRef={anchorRef("arena")}
+            onWatch={() => world.current?.setArenaSpectating(true)}
+            onHistory={() => open("honors")}
+          />
+        )}
         {ZONES.map((label, i) => (
           <button
             key={label.id}
@@ -883,7 +1193,11 @@ export default function App() {
           aria-label="지도에서 이동하기"
           onClick={() => open("map")}
         >
-          <MiniMap state={state} peers={multiplayer.peers} />
+          <MiniMap
+            state={state}
+            peers={multiplayer.peers}
+            arena={arenaDisplay}
+          />
         </button>
         <div className="map-caption">
           <span>
@@ -924,7 +1238,26 @@ export default function App() {
           <CircleHelp size={14} />
         </button>
       </div>
-      {nearZone && !section && (
+      {arenaSpectating && (
+        <div className="arena-spectator-actions">
+          <button
+            className="arena-spectator-exit"
+            onClick={() => world.current?.setArenaSpectating(false)}
+            aria-label="콜로세움 관전을 끝내고 내 자동차 보기"
+          >
+            <Eye size={16} />
+            <span>관전 끝내기</span>
+            <X size={14} />
+          </button>
+          <button
+            className="arena-spectator-history"
+            onClick={() => open("honors")}
+          >
+            <History size={14} /> 역대 우승
+          </button>
+        </div>
+      )}
+      {nearZone && !section && !arenaSpectating && (
         <div className="interaction-prompt">
           <button onClick={() => open(nearZone.id)}>
             <kbd>E</kbd>
@@ -992,16 +1325,26 @@ export default function App() {
       >
         <Paintbrush size={19} />
       </button>
+      {testDrive?.type === "body" && (
+        <aside className="local-drive-banner" aria-label="로컬 차량 시승">
+          <strong>{testDrive.name}</strong> 혼자 시승 중
+          <a href={import.meta.env.BASE_URL}>시승 종료</a>
+        </aside>
+      )}
       <footer>
         <span>roam. · 우리들의 작은 아지트</span>
         <span
           className="daytime-indicator"
-          title="5분에 걸쳐 밤으로, 다음 5분에 걸쳐 다시 낮으로 변해요. 한 주기는 10분이에요."
-          aria-label={`아지트의 시간: ${lighting?.label || "낮"}. 낮과 밤은 10분 주기로 변해요.`}
+          title={timeDescription}
+          aria-label={`아지트의 시간: ${lightingLabel}. ${timeDescription}`}
         >
           <TimeIcon size={14} strokeWidth={1.6} />
-          <span>{lighting?.label || "낮"}</span>
-          <small>천천히 흐르는 아지트의 시간</small>
+          <span>{lightingLabel}</span>
+          <small>
+            {timeControl.automatic
+              ? "천천히 흐르는 아지트의 시간"
+              : "내 화면의 시간 고정"}
+          </small>
         </span>
         <span>
           가볍게 들러요 <span>✳</span>
@@ -1223,28 +1566,97 @@ export default function App() {
             onTrack={() => visit("track")}
           />
         )}
+        {section === "honors" && <ArenaHonorsPanel record={arenaHonors} />}
         {section === "play" && (
-          <RacePanel
-            multiplayer={multiplayer}
-            onJoin={() => open("join")}
-            onTrack={() =>
-              multiplayer.currentRace &&
-              multiplayer.currentRace.status !== "waiting"
-                ? close()
-                : visit("track")
-            }
-          />
+          <>
+            <button className="play-honors-link" onClick={() => open("honors")}>
+              <Trophy size={13} /> 역대 우승 보기
+            </button>
+            <div
+              className="play-mode-tabs"
+              role="tablist"
+              aria-label="같이 놀 게임 선택"
+              onKeyDown={(event) => {
+                if (
+                  !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                    event.key,
+                  )
+                )
+                  return;
+                event.preventDefault();
+                const next =
+                  event.key === "Home"
+                    ? "arena"
+                    : event.key === "End"
+                      ? "race"
+                      : playMode === "arena"
+                        ? "race"
+                        : "arena";
+                setPlayMode(next);
+                event.currentTarget.querySelector(`#play-tab-${next}`)?.focus();
+              }}
+            >
+              <button
+                id="play-tab-arena"
+                role="tab"
+                tabIndex={playMode === "arena" ? 0 : -1}
+                aria-selected={playMode === "arena"}
+                aria-controls="play-mode-panel"
+                onClick={() => setPlayMode("arena")}
+              >
+                <Trophy size={16} /> 콜로세움
+              </button>
+              <button
+                id="play-tab-race"
+                role="tab"
+                tabIndex={playMode === "race" ? 0 : -1}
+                aria-selected={playMode === "race"}
+                aria-controls="play-mode-panel"
+                onClick={() => setPlayMode("race")}
+              >
+                <Flag size={16} /> 1대1 레이싱
+              </button>
+            </div>
+            <div
+              id="play-mode-panel"
+              role="tabpanel"
+              aria-labelledby={`play-tab-${playMode}`}
+            >
+              {playMode === "arena" ? (
+                <ArenaPanel
+                  multiplayer={multiplayer}
+                  onJoin={() => open("join")}
+                  onTrack={() => visit("track")}
+                  onPreview={() => visit("arena")}
+                  onResume={close}
+                />
+              ) : (
+                <RacePanel
+                  multiplayer={multiplayer}
+                  onJoin={() => open("join")}
+                  onTrack={() =>
+                    multiplayer.currentRace &&
+                    multiplayer.currentRace.status !== "waiting"
+                      ? close()
+                      : visit("track")
+                  }
+                />
+              )}
+            </div>
+          </>
         )}
         {section === "map" && (
           <>
             <div className="modal-eyebrow">OUR LITTLE WORLD</div>
             <h2 id="modal-title">어디서 만날까요?</h2>
             <p className="modal-intro">
-              한 장소를 골라 바로 이동할 수도 있어요.
+              만나고 싶은 장소를 골라 이동해요. 왼쪽 위 콜로세움은 참가하지
+              않고도 먼저 둘러볼 수 있어요.
             </p>
             <MiniMap
               state={state}
               peers={multiplayer.peers}
+              arena={arenaDisplay}
               onSelect={visit}
               large
             />
@@ -1310,8 +1722,10 @@ export default function App() {
                 맵 아래 레일을 한 바퀴 돌면 <strong>{LAP_REWARD}코인</strong>을
                 받아요.
                 <br />
-                차고지에서 100코인으로 상자를 열어요. 같이 놀자에서 대결이
-                성사되면 왼쪽 직선 코스로 자동 이동해요.
+                차고지에서 100코인으로 상자를 열어요. 같이 놀자에서는 각
+                20코인을 걸고 2–10명이 콜로세움에서 만나요. 마지막까지 경기장에
+                남은 한 대가 모인 코인을 모두 받아요. 1대1 레이싱 탭에서는 외곽
+                코스 한 바퀴 대결도 즐길 수 있어요.
               </p>
             </div>
             <p className="modal-intro">

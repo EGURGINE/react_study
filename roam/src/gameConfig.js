@@ -5,10 +5,11 @@ export const CRATE_COST = 100;
 export const STARTER_COINS = 0;
 export const DUPLICATE_REFUND = 40;
 export const RARITIES = Object.freeze([
-  { id: "common", label: "커먼", color: "#ffffff", weight: 75 },
+  { id: "common", label: "커먼", color: "#ffffff", weight: 74.5 },
   { id: "rare", label: "레어", color: "#4c95ef", weight: 20 },
   { id: "epic", label: "에픽", color: "#a468e2", weight: 4 },
   { id: "legendary", label: "레전더리", color: "#f6c845", weight: 1 },
+  { id: "mythic", label: "신화", color: "#ff718f", weight: 0.5 },
 ]);
 export const STARTER_EQUIPPED = Object.freeze({
   body: "body-starter",
@@ -32,36 +33,103 @@ export const CONNECTOR = Object.freeze({
   endZ: 29,
 });
 export const DUEL_TRACK = Object.freeze({
-  cx: -31,
-  startZ: 18,
-  finishZ: -24,
+  cx: 0,
+  cz: 10,
+  radius: 32,
+  halfStraight: 8,
   halfWidth: 3.2,
   laneOffset: 1.25,
-  endPadding: 4,
 });
-export const DUEL_LENGTH = DUEL_TRACK.startZ - DUEL_TRACK.finishZ;
+export const DUEL_LENGTH =
+  4 * DUEL_TRACK.halfStraight + 2 * Math.PI * DUEL_TRACK.radius;
+
+/** One forward lap around the island; positive lateral offsets face outward. */
+export function duelPoint(progress, lateralOffset = 0) {
+  let distance = wrap(progress) * DUEL_LENGTH;
+  const { cx, cz, halfStraight: h, radius: centerRadius } = DUEL_TRACK;
+  const radius = centerRadius + lateralOffset;
+  if (distance <= h)
+    return { x: cx - radius, z: cz - distance, heading: Math.PI };
+  distance -= h;
+  if (distance <= Math.PI * centerRadius) {
+    const angle = Math.PI + distance / centerRadius;
+    return {
+      x: cx + radius * Math.cos(angle),
+      z: cz - h + radius * Math.sin(angle),
+      heading: -angle,
+    };
+  }
+  distance -= Math.PI * centerRadius;
+  if (distance <= 2 * h)
+    return { x: cx + radius, z: cz - h + distance, heading: 0 };
+  distance -= 2 * h;
+  if (distance <= Math.PI * centerRadius) {
+    const angle = distance / centerRadius;
+    return {
+      x: cx + radius * Math.cos(angle),
+      z: cz + h + radius * Math.sin(angle),
+      heading: -angle,
+    };
+  }
+  distance -= Math.PI * centerRadius;
+  return { x: cx - radius, z: cz + h - distance, heading: Math.PI };
+}
 export function duelStart(lane = 0) {
-  return {
-    x:
-      DUEL_TRACK.cx +
-      (lane === 1 ? DUEL_TRACK.laneOffset : -DUEL_TRACK.laneOffset),
-    z: DUEL_TRACK.startZ,
-    heading: Math.PI,
-  };
+  return duelPoint(0, (lane === 1 ? 1 : -1) * DUEL_TRACK.laneOffset);
 }
 export function projectDuel(x, z) {
-  const valid = Number.isFinite(x) && Number.isFinite(z);
-  const distance = valid ? Math.abs(x - DUEL_TRACK.cx) : Infinity;
+  if (!Number.isFinite(x) || !Number.isFinite(z))
+    return {
+      x: 0,
+      z: DUEL_TRACK.cz,
+      heading: 0,
+      progress: 0,
+      distance: Infinity,
+      lateralOffset: 0,
+      inside: false,
+    };
+  const { cx, cz, radius: r, halfStraight: h, halfWidth } = DUEL_TRACK;
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const straightZ = clamp(z, cz - h, cz + h);
+  let topAngle = Math.atan2(z - (cz - h), x - cx);
+  if (topAngle < 0) topAngle += 2 * Math.PI;
+  topAngle = clamp(topAngle, Math.PI, 2 * Math.PI);
+  const bottomAngle = clamp(Math.atan2(z - (cz + h), x - cx), 0, Math.PI);
+  const candidates = [
+    {
+      x: cx - r,
+      z: straightZ,
+      s: straightZ <= cz ? cz - straightZ : DUEL_LENGTH - (straightZ - cz),
+    },
+    { x: cx + r, z: straightZ, s: h + Math.PI * r + straightZ - (cz - h) },
+    {
+      x: cx + r * Math.cos(topAngle),
+      z: cz - h + r * Math.sin(topAngle),
+      s: h + (topAngle - Math.PI) * r,
+    },
+    {
+      x: cx + r * Math.cos(bottomAngle),
+      z: cz + h + r * Math.sin(bottomAngle),
+      s: 3 * h + Math.PI * r + bottomAngle * r,
+    },
+  ];
+  const nearest = candidates.reduce((best, point) =>
+    Math.hypot(x - point.x, z - point.z) < Math.hypot(x - best.x, z - best.z)
+      ? point
+      : best,
+  );
+  const progress = wrap(nearest.s / DUEL_LENGTH);
+  const heading = duelPoint(progress).heading;
+  const distance = Math.hypot(x - nearest.x, z - nearest.z);
   return {
-    progress: valid
-      ? Math.max(0, Math.min(1, (DUEL_TRACK.startZ - z) / DUEL_LENGTH))
-      : 0,
+    x: nearest.x,
+    z: nearest.z,
+    heading,
+    progress,
     distance,
-    inside:
-      valid &&
-      distance <= DUEL_TRACK.halfWidth &&
-      z >= DUEL_TRACK.finishZ - DUEL_TRACK.endPadding &&
-      z <= DUEL_TRACK.startZ + DUEL_TRACK.endPadding,
+    lateralOffset:
+      (x - nearest.x) * Math.cos(heading) - (z - nearest.z) * Math.sin(heading),
+    inside: distance <= halfWidth + 1e-8,
   };
 }
 const wrap = (value) => ((value % 1) + 1) % 1;
@@ -143,8 +211,9 @@ export function isDriveable(x, z) {
 /** Face back into the current road after an edge hit, including reversing. */
 export function recoveryHeading(x, z, movementSign = 1) {
   let aim = { x: 0, z: 0 };
-  if (projectDuel(x, z).inside) {
-    aim = { x: DUEL_TRACK.cx, z: (DUEL_TRACK.startZ + DUEL_TRACK.finishZ) / 2 };
+  const duel = projectDuel(x, z);
+  if (duel.inside) {
+    aim = duel.distance > 0.2 ? duel : duelPoint(duel.progress + 0.005);
   } else if (
     Math.abs(x) <= CONNECTOR.halfWidth &&
     z >= CONNECTOR.startZ &&

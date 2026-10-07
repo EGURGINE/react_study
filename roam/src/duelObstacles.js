@@ -1,4 +1,4 @@
-import { DUEL_TRACK, DUEL_LENGTH } from "./gameConfig.js";
+import { DUEL_TRACK, DUEL_LENGTH, duelPoint } from "./gameConfig.js";
 
 // Shared local prediction and server validation limits. Obstacles never grant
 // a larger movement budget or allow leaving the existing course bounds.
@@ -22,6 +22,14 @@ export const DUEL_OBSTACLE_RULES = Object.freeze({
     speed: 10,
     jumpVelocity: 3.2,
   }),
+  boost: Object.freeze({
+    r: 1.05,
+    cooldownMs: 1700,
+    maxTriggerHeight: 0.55,
+    speed: 20,
+    duration: 1.5,
+    jumpVelocity: 0,
+  }),
 });
 
 /** A server-selected seed creates one fixed, mirrored layout for each race. */
@@ -39,33 +47,35 @@ export function createDuelObstacles(seed, raceId) {
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 0x100000000;
   };
-  const rows = random() < 0.5 ? 3 : 4;
-  const firstKind = random() < 0.5 ? "jump" : "bounce";
+  const rows = 8 + Math.floor(random() * 3);
+  const kinds = ["jump", "bounce", "boost"];
+  const firstKind = Math.floor(random() * kinds.length);
   const obstacles = [];
   for (let row = 0; row < rows; row += 1) {
     const kind =
       row === 0
-        ? firstKind
-        : row === rows - 1
-          ? firstKind === "jump"
-            ? "bounce"
-            : "jump"
-          : random() < 0.5
-            ? "jump"
-            : "bounce";
+        ? kinds[firstKind]
+        : row === Math.floor(rows / 2)
+          ? kinds[(firstKind + 1) % kinds.length]
+          : row === rows - 1
+            ? kinds[(firstKind + 2) % kinds.length]
+            : kinds[Math.floor(random() * kinds.length)];
     const distance =
-      8 + ((DUEL_LENGTH - 16) * row) / (rows - 1) + (random() - 0.5) * 1.2;
+      12 + ((DUEL_LENGTH - 24) * row) / (rows - 1) + (random() - 0.5) * 4;
     const offset = (random() < 0.5 ? -1 : 1) * (0.45 + random() * 0.1);
     for (const lane of [0, 1]) {
+      const progress = distance / DUEL_LENGTH;
+      const pose = duelPoint(
+        progress,
+        (lane === 0 ? -1 : 1) * (DUEL_TRACK.laneOffset + offset),
+      );
       obstacles.push(
         Object.freeze({
           id: `duel-${raceId}-${row}-${lane}`,
           kind,
           lane,
-          x:
-            DUEL_TRACK.cx +
-            (lane === 0 ? -1 : 1) * (DUEL_TRACK.laneOffset + offset),
-          z: DUEL_TRACK.startZ - distance,
+          ...pose,
+          progress,
           r: DUEL_OBSTACLE_RULES[kind].r,
         }),
       );

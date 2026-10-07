@@ -1,12 +1,44 @@
 export const HALF_CYCLE_SECONDS = 300;
 export const DAY_CYCLE_SECONDS = HALF_CYCLE_SECONDS * 2;
 
+/** A per-visitor clock: manual scrubbing holds still; auto resumes there. */
+export function createLightingClock() {
+  let automatic = true,
+    manualTime = 0,
+    anchorTime = 0,
+    anchorElapsed = 0;
+  const safe = (value) => (Number.isFinite(value) ? Math.max(0, value) : 0);
+  return {
+    set({ automatic: auto, time } = {}, elapsed = 0) {
+      if (typeof auto !== "boolean") return;
+      if (!auto) {
+        manualTime = Math.min(HALF_CYCLE_SECONDS, safe(time));
+      } else if (!automatic) {
+        anchorTime = manualTime;
+        anchorElapsed = safe(elapsed);
+      }
+      automatic = auto;
+    },
+    read(elapsed = 0) {
+      return {
+        automatic,
+        seconds: automatic
+          ? (anchorTime + Math.max(0, safe(elapsed) - anchorElapsed)) %
+            DAY_CYCLE_SECONDS
+          : manualTime,
+      };
+    },
+  };
+}
+
 const COLOR_KEYS = [
   "sunColor",
   "ambientColor",
   "hemisphereSky",
   "hemisphereGround",
   "skyColor",
+  "skyMidColor",
+  "skyBottomColor",
 ];
 
 // Palette positions follow the continuous night factor, not the phase label.
@@ -18,15 +50,19 @@ const PALETTE = [
     ambientColor: "#fff5e3",
     hemisphereSky: "#c8e8ec",
     hemisphereGround: "#c8a678",
-    skyColor: "#efefe5",
+    skyColor: "#83a6f5",
+    skyMidColor: "#2698a5",
+    skyBottomColor: "#155f73",
   },
   {
     at: 0.45,
-    sunColor: "#f6d5bd",
-    ambientColor: "#edd2c5",
-    hemisphereSky: "#bcbacb",
-    hemisphereGround: "#b28d79",
-    skyColor: "#d6b3ad",
+    sunColor: "#ffd2a0",
+    ambientColor: "#f1c9a6",
+    hemisphereSky: "#eab992",
+    hemisphereGround: "#b68153",
+    skyColor: "#f3b374",
+    skyMidColor: "#de895a",
+    skyBottomColor: "#965b47",
   },
   {
     at: 0.72,
@@ -34,7 +70,9 @@ const PALETTE = [
     ambientColor: "#a1a3c1",
     hemisphereSky: "#6e7caa",
     hemisphereGround: "#786a82",
-    skyColor: "#565776",
+    skyColor: "#bc816d",
+    skyMidColor: "#735569",
+    skyBottomColor: "#343e58",
   },
   {
     at: 1,
@@ -42,7 +80,9 @@ const PALETTE = [
     ambientColor: "#8296c1",
     hemisphereSky: "#526f9f",
     hemisphereGround: "#5a4c62",
-    skyColor: "#141a35",
+    skyColor: "#292c53",
+    skyMidColor: "#203e5e",
+    skyBottomColor: "#102e3b",
   },
 ];
 
@@ -182,6 +222,9 @@ export function getLightingState(elapsedSeconds) {
   ui.sceneInk = sceneUI.ink;
   ui.sceneMuted = sceneUI.muted;
   ui.sceneAccent = sceneUI.accent;
+  const footerUI = readablePalette(colors.skyBottomColor);
+  ui.footerInk = footerUI.ink;
+  ui.footerMuted = footerUI.muted;
 
   return {
     phase,

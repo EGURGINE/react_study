@@ -6,7 +6,9 @@ import {
   trackPoint,
   projectTrack,
   DUEL_TRACK,
+  DUEL_LENGTH,
   duelStart,
+  duelPoint,
   projectDuel,
   CONNECTOR,
 } from "./gameConfig.js";
@@ -124,14 +126,95 @@ test("invalid and distant off-map destinations are rejected", () => {
   assert.deepEqual(findWorldPath({ x: 0, z: 34 }, { x: 0, z: 29 }), []);
 });
 
-test("the separate duel course supports a straight route on either lane", () => {
+test("outer duel routes follow the curved road on either lane without crossing its center", () => {
   for (const lane of [0, 1]) {
     const start = duelStart(lane);
-    const finish = { x: start.x, z: DUEL_TRACK.finishZ };
+    const finish = duelPoint(0.7, (lane ? 1 : -1) * DUEL_TRACK.laneOffset);
     const path = findWorldPath(start, finish);
-    assert.deepEqual(path, [finish]);
+    assert.ok(path.length > 100);
     validateRoute(start, path);
-    assert.equal(projectDuel(path.at(-1).x, path.at(-1).z).progress, 1);
+    assert.ok(
+      Math.abs(projectDuel(path.at(-1).x, path.at(-1).z).progress - 0.7) <
+        1e-10,
+    );
+  }
+});
+
+test("outer duel navigation wraps forward across the start and supports nearby lane changes", () => {
+  const start = duelPoint(0.82, 1.25);
+  const target = duelPoint(0.08, -1.25);
+  const path = findWorldPath(start, target);
+  validateRoute(start, path);
+  let previous = 0.82;
+  let traveled = 0;
+  for (const point of path) {
+    const progress = projectDuel(point.x, point.z).progress;
+    const delta = (progress - previous + 1) % 1;
+    assert.ok(delta < 0.005 || Math.abs(delta - 1) < 1e-9);
+    if (delta < 0.5) traveled += delta;
+    previous = progress;
+  }
+  assert.ok(Math.abs(traveled - 0.26) < 1e-8);
+  const across = findWorldPath(duelPoint(0.2, -1.25), duelPoint(0.2, 1.25));
+  assert.ok(
+    across.length <= 3,
+    "a lane change must not accidentally route a full lap",
+  );
+  validateRoute(duelPoint(0.2, -1.25), across);
+});
+
+test("side-by-side duel departures keep their lanes and clear a stationary rival", () => {
+  const paths = [];
+  for (const lane of [0, 1]) {
+    const start = duelStart(lane);
+    const rival = duelStart(1 - lane);
+    for (const offset of [0, (lane ? -1 : 1) * DUEL_TRACK.laneOffset]) {
+      const path = findWorldPath(start, duelPoint(0.3, offset));
+      validateRoute(start, path);
+      assert.ok(Math.hypot(path[0].x - start.x, path[0].z - start.z) < 1e-9);
+      let previous = start;
+      for (const next of path) {
+        if (projectDuel(next.x, next.z).progress * DUEL_LENGTH > 15) break;
+        for (let step = 0; step <= 20; step += 1) {
+          const x = previous.x + ((next.x - previous.x) * step) / 20;
+          const z = previous.z + ((next.z - previous.z) * step) / 20;
+          assert.ok(Math.hypot(x - rival.x, z - rival.z) >= 1.5);
+        }
+        previous = next;
+      }
+      if (offset === 0) paths.push(path);
+    }
+  }
+  for (let index = 0; index < paths[0].length; index += 1) {
+    const left = paths[0][index];
+    const right = paths[1][index];
+    if (projectDuel(left.x, left.z).progress * DUEL_LENGTH > 5) break;
+    assert.ok(Math.hypot(left.x - right.x, left.z - right.z) >= 1.5);
+  }
+});
+
+test("duel lane changes blend over fifteen meters and remain within curved road edges", () => {
+  for (const progress of [0.07, 0.36, 0.57, 0.86]) {
+    for (const side of [-1, 1]) {
+      const fromOffset = side * (DUEL_TRACK.halfWidth - 0.1);
+      const toOffset = -fromOffset;
+      const start = duelPoint(progress, fromOffset);
+      const target = duelPoint(progress + 0.12, toOffset);
+      const path = findWorldPath(start, target);
+      validateRoute(start, path);
+      let previousOffset = fromOffset;
+      for (const next of path) {
+        const projected = projectDuel(next.x, next.z);
+        const wrapped = (projected.progress - progress + 1) % 1;
+        const distance = (wrapped > 1 - 1e-9 ? 0 : wrapped) * DUEL_LENGTH;
+        const amount = Math.min(1, distance / 15);
+        const expected = fromOffset + (toOffset - fromOffset) * amount * amount * (3 - 2 * amount);
+        assert.ok(Math.abs(projected.lateralOffset - expected) < 1e-8);
+        assert.ok((projected.lateralOffset - previousOffset) * side <= 1e-8);
+        previousOffset = projected.lateralOffset;
+      }
+      assert.ok(Math.hypot(path.at(-1).x - target.x, path.at(-1).z - target.z) < 1e-8);
+    }
   }
 });
 
@@ -143,9 +226,16 @@ test("navigation never invents a road between the disconnected duel and island",
   }
 });
 
-test("duel end padding is reachable but off-course clicks are rejected", () => {
+test("outer duel edge destinations are reachable but its empty center is rejected", () => {
   const start = duelStart(1);
-  const padding = { x: DUEL_TRACK.cx + 2.5, z: DUEL_TRACK.finishZ - 3 };
-  validateRoute(start, findWorldPath(start, padding));
-  assert.deepEqual(findWorldPath(start, { x: DUEL_TRACK.cx + 4, z: 0 }), []);
+  const edge = duelPoint(0.35, DUEL_TRACK.halfWidth - 0.1);
+  validateRoute(start, findWorldPath(start, edge));
+  assert.deepEqual(
+    findWorldPath(start, { x: DUEL_TRACK.cx, z: DUEL_TRACK.cz }),
+    [],
+  );
+  assert.deepEqual(
+    findWorldPath(start, duelPoint(0.35, DUEL_TRACK.halfWidth + 0.1)),
+    [],
+  );
 });

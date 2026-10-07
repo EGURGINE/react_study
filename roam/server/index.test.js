@@ -14,6 +14,9 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 import { createGameServer } from "./index.js";
 import { createGalleryStore } from "./gallery.js";
+import { createGameEngine } from "./game.js";
+import { ITEMS, RARITIES, trackPoint } from "../src/gameConfig.js";
+import { getVehicleProfile } from "../src/vehicleDynamics.js";
 
 const ORIGIN = "http://localhost:5173";
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9]);
@@ -30,6 +33,7 @@ async function fixture(t, options = {}) {
     options.galleryDirectory ??
     (await mkdtemp(join(tmpdir(), "roam-gallery-test-")));
   const playersDirectory = await mkdtemp(join(tmpdir(), "roam-players-test-"));
+  const preparedPlayers = await options.preparePlayers?.(playersDirectory);
   const server = createGameServer({
     allowedOrigins: [ORIGIN],
     ...options,
@@ -105,7 +109,7 @@ async function fixture(t, options = {}) {
     await once(socket, "open");
     return client;
   }
-  return { server, base, connect, close, galleryDirectory };
+  return { server, base, connect, close, galleryDirectory, preparedPlayers };
 }
 
 async function approach(client, current, target) {
@@ -138,6 +142,224 @@ async function travel(client, destination, target) {
   const reply = await client.wait((message) => message.type === "teleport");
   return approach(client, reply.player, target);
 }
+
+test("accepted car contacts broadcast one shared impulse to both drivers; spoofed contacts cannot push cars", async (t) => {
+  const room = await fixture(t);
+  const driver = await room.connect(),
+    other = await room.connect();
+  const a = await driver.join("충돌검증차"),
+    b = await other.join("상대검증차");
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  const baseline = { x: b.player.x - 2.5, z: b.player.z, heading: Math.PI / 2 };
+  driver.send({ type: "move", ...baseline });
+  await driver.wait(
+    (m) =>
+      m.type === "state" &&
+      m.players.some((p) => p.id === a.player.id && p.x === baseline.x),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  driver.send({ type: "move", ...baseline, x: b.player.x - 1.2 });
+  const impact = await driver.wait((m) => m.type === "car:impact");
+  const received = await other.wait((m) => m.type === "car:impact");
+  assert.deepEqual(received, impact);
+  assert.equal(impact.participants.length, 2);
+  assert.ok(impact.strength > 0.3);
+  assert.equal(impact.participants[0].vx, -impact.participants[1].vx);
+  const peerImpulse = impact.participants.find((p) => p.id === b.player.id).vx;
+  assert.ok(peerImpulse >= 1.1 && peerImpulse <= 4);
+  driver.send({ type: "move", ...baseline, x: b.player.x - 1.1 });
+  await assert.rejects(
+    driver.wait((m) => m.type === "car:impact", 200),
+    /Timed out/,
+  );
+  driver.send({
+    type: "car:impact",
+    participants: [{ id: b.player.id, vx: 1000, vz: 0 }],
+  });
+  assert.equal(
+    (await driver.wait((m) => m.type === "error")).code,
+    "invalid_message",
+  );
+  driver.send({ type: "move", x: 500, z: 500, heading: 0 });
+  assert.equal(
+    (await driver.wait((m) => m.type === "error")).code,
+    "invalid_move",
+  );
+  await assert.rejects(
+    other.wait((m) => m.type === "car:impact", 150),
+    /Timed out/,
+  );
+});
+
+test("contacts use owned equipped body mass and ignore client-supplied physics or cosmetics", async (t) => {
+  const bodies = ITEMS.filter(
+    (item) => item.type === "body" && !item.starter,
+  ).sort((a, b) => getVehicleProfile(a).mass - getVehicleProfile(b).mass);
+  const selected = [bodies[0], bodies.at(-1)];
+  const room = await fixture(t, {
+    preparePlayers(directory) {
+      let time = 1_700_000_000_000;
+      const rolls = [];
+      const game = createGameEngine({
+        directory,
+        now: () => time,
+        random: () => rolls.shift(),
+      });
+      try {
+        return selected.map((body, index) => {
+          const player = {
+            id: `mass-seed-${index}`,
+            nickname: `질량 준비 ${index}`,
+            ...trackPoint(0),
+            y: 0,
+          };
+          const { resumeToken } = game.attach(player);
+          for (let lap = 0; lap < 5; lap += 1)
+            for (let step = 0; step <= 100; step += 1) {
+              time += 100;
+              Object.assign(player, trackPoint(step / 100));
+              game.onMove(player.id, player);
+            }
+          const tier = RARITIES.findIndex(
+            (rarity) => rarity.id === body.rarity,
+          );
+          const lower = RARITIES.slice(0, tier).reduce(
+            (sum, rarity) => sum + rarity.weight,
+            0,
+          );
+          const total = RARITIES.reduce(
+            (sum, rarity) => sum + rarity.weight,
+            0,
+          );
+          const pool = ITEMS.filter(
+            (item) => item.rarity === body.rarity && !item.starter,
+          );
+          rolls.push(
+            (lower + RARITIES[tier].weight / 2) / total,
+            (pool.findIndex((item) => item.id === body.id) + 0.5) / pool.length,
+          );
+          const opened = game.handle(player.id, {
+            type: "game",
+            action: "crate",
+            requestId: "seed-body",
+          });
+          assert.equal(opened.item.id, body.id);
+          return { token: resumeToken, body };
+        });
+      } finally {
+        game.shutdown();
+      }
+    },
+  });
+  const clients = await Promise.all([room.connect(), room.connect()]);
+  const players = [];
+  for (const [index, client] of clients.entries()) {
+    const prepared = room.preparedPlayers[index];
+    client.send({
+      type: "join",
+      nickname: `질량 검증 ${index}`,
+      token: prepared.token,
+      mass: 1000,
+      cosmetics: { body: selected[1 - index].id },
+    });
+    const welcome = await client.wait((message) => message.type === "welcome");
+    assert.equal(welcome.player.cosmetics.body, "body-starter");
+    players.push(welcome.player);
+    const unowned = bodies.find((body) => body.id !== prepared.body.id);
+    client.send({
+      type: "game",
+      action: "equip",
+      requestId: "unowned",
+      itemId: unowned.id,
+    });
+    assert.equal(
+      (
+        await client.wait(
+          (message) =>
+            message.type === "game:result" && message.requestId === "unowned",
+        )
+      ).code,
+      "item_not_owned",
+    );
+    client.send({
+      type: "game",
+      action: "equip",
+      requestId: "forged",
+      itemId: prepared.body.id,
+      mass: 1000,
+    });
+    assert.equal(
+      (
+        await client.wait(
+          (message) =>
+            message.type === "game:result" && message.requestId === "forged",
+        )
+      ).code,
+      "invalid_game",
+    );
+    client.send({
+      type: "game",
+      action: "equip",
+      requestId: "owned",
+      itemId: prepared.body.id,
+    });
+    const equipped = await client.wait(
+      (message) =>
+        message.type === "game:result" && message.requestId === "owned",
+    );
+    assert.equal(equipped.ok, true);
+    assert.equal(equipped.profile.equipped.body, prepared.body.id);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 550));
+  const [driver, other] = clients;
+  const baseline = {
+    x: players[1].x - 2.5,
+    z: players[1].z,
+    heading: Math.PI / 2,
+  };
+  driver.send({ type: "move", ...baseline });
+  await driver.wait(
+    (message) =>
+      message.type === "state" &&
+      message.players.some(
+        (player) => player.id === players[0].id && player.x === baseline.x,
+      ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  driver.send({
+    type: "move",
+    ...baseline,
+    x: players[1].x - 1.2,
+    mass: 1000,
+    bounce: 1000,
+    body: selected[1].id,
+    cosmetics: { body: selected[1].id },
+  });
+  const hit = await driver.wait((message) => message.type === "car:impact");
+  assert.deepEqual(
+    await other.wait((message) => message.type === "car:impact"),
+    hit,
+  );
+  const light = hit.participants.find((player) => player.id === players[0].id);
+  const heavy = hit.participants.find((player) => player.id === players[1].id);
+  const lightMass = getVehicleProfile(selected[0]).mass;
+  const heavyMass = getVehicleProfile(selected[1]).mass;
+  assert.ok(lightMass < heavyMass);
+  assert.ok(Math.abs(light.vx) > Math.abs(heavy.vx));
+  assert.ok(Math.abs(light.vx * lightMass + heavy.vx * heavyMass) < 1e-8);
+  const state = await driver.wait(
+    (message) =>
+      message.type === "state" &&
+      message.players.some(
+        (player) =>
+          player.id === players[0].id && player.x === players[1].x - 1.2,
+      ),
+  );
+  assert.equal(
+    state.players.find((player) => player.id === players[0].id).cosmetics.body,
+    selected[0].id,
+  );
+});
 
 test("concurrent admission caps the room at ten and a departure frees a slot", async (t) => {
   const room = await fixture(t);
@@ -268,6 +490,41 @@ test("positions must be finite, inside the island, and within movement bounds", 
   );
   assert.equal(player.z, z);
   assert.ok(Math.abs(player.heading - 0.5) < 1e-10);
+});
+
+test("twenty-two meter per second combined vehicle motion stays within authoritative movement limits", async (t) => {
+  const room = await fixture(t);
+  const client = await room.connect();
+  const welcome = await client.join("고속 물리 검증");
+  const errors = [];
+  client.socket.on("message", (raw) => {
+    const message = JSON.parse(raw);
+    if (message.type === "error") errors.push(message.code);
+  });
+  await approach(client, welcome.player, { x: 10, z: 0 });
+  let destination;
+  for (let step = 1; step <= 20; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const angle = (step * 22 * 0.08) / 10;
+    destination = {
+      x: Math.cos(angle) * 10,
+      z: Math.sin(angle) * 10,
+      heading: -angle,
+      y: Math.sin((step / 20) * Math.PI) * 3.2,
+    };
+    client.send({ type: "move", ...destination });
+  }
+  await client.wait(
+    (message) =>
+      message.type === "state" &&
+      message.players.some(
+        (player) =>
+          player.id === welcome.player.id &&
+          player.x === destination.x &&
+          player.z === destination.z,
+      ),
+  );
+  assert.deepEqual(errors, []);
 });
 
 test("unjoined and malformed messages do not create players; honks use session identity", async (t) => {

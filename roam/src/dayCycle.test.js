@@ -4,6 +4,7 @@ import {
   DAY_CYCLE_SECONDS,
   HALF_CYCLE_SECONDS,
   getLightingState,
+  createLightingClock,
 } from "./dayCycle.js";
 
 const colorFields = [
@@ -12,7 +13,26 @@ const colorFields = [
   "hemisphereSky",
   "hemisphereGround",
   "skyColor",
+  "skyMidColor",
+  "skyBottomColor",
 ];
+
+test("manual time holds any sunset value and auto resumes continuously through night and dawn", () => {
+  const clock = createLightingClock();
+  assert.deepEqual(clock.read(75), { automatic: true, seconds: 75 });
+  clock.set({ automatic: false, time: 150 }, 75);
+  assert.equal(getLightingState(clock.read(90).seconds).phase, "sunset");
+  assert.deepEqual(clock.read(1000), { automatic: false, seconds: 150 });
+  clock.set({ automatic: true, time: 0 }, 1000);
+  assert.deepEqual(clock.read(1000), { automatic: true, seconds: 150 });
+  assert.equal(clock.read(1150).seconds, 300);
+  assert.equal(getLightingState(clock.read(1300).seconds).phase, "dawn");
+  assert.equal(clock.read(1450).seconds, 0);
+  clock.set({ automatic: false, time: 999 }, 1500);
+  assert.equal(clock.read(1600).seconds, 300);
+  clock.set({ automatic: false, time: NaN }, 1700);
+  assert.equal(clock.read(1800).seconds, 0);
+});
 const numericFields = [
   "night",
   "sunAltitude",
@@ -55,7 +75,8 @@ test("lighting starts in the original daylight, reaches night in five minutes, a
   assert.equal(day.label, "낮");
   assert.equal(day.night, 0);
   assert.equal(day.progress, 0);
-  assert.equal(day.skyColor, "#efefe5");
+  assert.equal(day.skyColor, "#83a6f5");
+  assert.equal(day.skyBottomColor, "#155f73");
   assert.equal(day.sunColor, "#fff7dc");
   assert.equal(day.ambientColor, "#fff5e3");
   assert.equal(day.hemisphereSky, "#c8e8ec");
@@ -69,7 +90,8 @@ test("lighting starts in the original daylight, reaches night in five minutes, a
   assert.equal(night.label, "밤");
   assert.equal(night.night, 1);
   assert.equal(night.progress, 0.5);
-  assert.equal(night.skyColor, "#141a35");
+  assert.equal(night.skyColor, "#292c53");
+  assert.equal(night.skyBottomColor, "#102e3b");
   close(night.sunIntensity, 0.6);
   close(night.ambientIntensity, 0.5);
   close(night.hemiIntensity, 0.55);
@@ -98,6 +120,13 @@ test("the first half darkens monotonically and the second half returns through d
     dawn = getLightingState(450);
   assert.equal(sunset.phase, "sunset");
   assert.equal(sunset.label, "노을");
+  for (const key of ["skyColor", "skyMidColor"]) {
+    const [red, green, blue] = channels(sunset[key]);
+    assert.ok(
+      red > green && green > blue,
+      "sunset remains orange/apricot instead of purple",
+    );
+  }
   assert.equal(dawn.phase, "dawn");
   assert.equal(dawn.label, "새벽");
   close(sunset.night, dawn.night);
@@ -144,7 +173,7 @@ test("phase and palette boundaries keep lighting and UI surfaces continuous", ()
 
 test("UI foregrounds stay readable on panels and the actual sky through the whole cycle", () => {
   for (let seconds = 0; seconds <= DAY_CYCLE_SECONDS; seconds += 0.25) {
-    const { ui, skyColor } = getLightingState(seconds);
+    const { ui, skyColor, skyBottomColor } = getLightingState(seconds);
     for (const key of ["ink", "muted", "accent", "danger"]) {
       assert.ok(
         contrast(ui[key], ui.panel) >= 4.5,
@@ -161,6 +190,8 @@ test("UI foregrounds stay readable on panels and the actual sky through the whol
       contrast(ui.onAccent, ui.accent) >= 4.5,
       `${seconds}s: action label lost contrast`,
     );
+    assert.ok(contrast(ui.footerInk, skyBottomColor) >= 4.5);
+    assert.ok(contrast(ui.footerMuted, skyBottomColor) >= 4.5);
   }
   for (const seconds of [150, 450]) {
     const { ui, skyColor } = getLightingState(seconds);

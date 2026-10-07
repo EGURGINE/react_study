@@ -23,7 +23,7 @@ function fixture(t) {
   car.add(visual);
   visual.add(body);
   // The jeep is assembled inside world.js. Keep its existing lamp housings in
-  // this fixture; installCarBodies builds the other six production shells.
+  // this fixture; installCarBodies builds the other production shells.
   for (const x of [-0.42, 0.42]) {
     for (const [w, h, z, y] of [
       [0.2, 0.15, 0.978, 0.6],
@@ -87,7 +87,7 @@ test("vehicle emitters keep their body-relative pose through suspension, tilt, j
   }
 });
 
-test("front and rear emitters remain clear of the existing lamps and all seven selected shells", (t) => {
+test("front and rear emitters remain clear of the existing lamps and every selected shell", (t) => {
   const { scene, car, emitters } = fixture(t);
   for (const style of BODY_STYLES) {
     const item = ITEMS.find(

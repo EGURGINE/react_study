@@ -1,28 +1,23 @@
 import * as THREE from "three";
-import { DUEL_TRACK, DUEL_LENGTH } from "./gameConfig.js";
+import { DUEL_TRACK, DUEL_LENGTH, duelPoint } from "./gameConfig.js";
 import { DUEL_OBSTACLE_RULES } from "./duelObstacles.js";
 
-/** The duel course is a separate two-lane sprint. All meshes are scene-owned
- * and intentionally have no connection or collision shortcut to the island. */
+/** All circuit surfaces sample the same closed centerline as race validation. */
 export function createDuelWorld(scene) {
   const root = new THREE.Group();
-  root.name = "duel-sprint-course";
+  root.name = "duel-circuit-course";
   scene.add(root);
-  const { cx, startZ, finishZ, halfWidth, endPadding, laneOffset } = DUEL_TRACK;
-  const nearZ = startZ + endPadding;
-  const farZ = finishZ - endPadding;
-  const centerZ = (nearZ + farZ) / 2;
-  const length = nearZ - farZ;
-  const glowing = [];
-  const materials = new Map();
+  const { halfWidth, laneOffset } = DUEL_TRACK;
+  const glowing = [],
+    materials = new Map(),
+    obstacles = new Map();
   const obstacleRoot = new THREE.Group();
   obstacleRoot.name = "duel-race-obstacles";
   root.add(obstacleRoot);
-  const obstacles = new Map();
-  let race = null;
-  let lane = null;
-  let layoutId = null;
-  let night = 0;
+  let race = null,
+    lane = null,
+    layoutId = null,
+    night = 0;
   function mat(color) {
     if (!materials.has(color))
       materials.set(
@@ -31,19 +26,23 @@ export function createDuelWorld(scene) {
       );
     return materials.get(color);
   }
-  function neon(dayColor, lightColor, peak) {
+  function neon(color, emissive, peak) {
     const material = new THREE.MeshStandardMaterial({
-      color: dayColor,
-      emissive: lightColor,
+      color,
+      emissive,
       emissiveIntensity: 0.025,
       roughness: 0.6,
     });
     glowing.push({ material, peak });
     return material;
   }
-  const cyan = neon("#c1dad1", "#85e5ff", 3.3);
-  const violet = neon("#d5cadd", "#c7a3ff", 4.1);
-  const white = neon("#f7efd5", "#e7f1ff", 2.65);
+  const cyan = neon("#bacfc3", "#86e7dc", 2.3);
+  const violet = neon("#c5becd", "#c5a6ff", 2.6);
+  const white = neon("#f5eed8", "#f3eacb", 1.1);
+  // Wider, brighter edge tubes stay visible when the full circuit is in view.
+  // Keep their materials separate so arrows and the start gate retain their glow.
+  const edgeCyan = neon("#bacfc3", "#86e7dc", 2.9);
+  const edgeViolet = neon("#c5becd", "#c5a6ff", 3.4);
   function mesh(geometry, color, parent = root, x = 0, y = 0, z = 0) {
     const result = new THREE.Mesh(
       geometry,
@@ -58,104 +57,174 @@ export function createDuelWorld(scene) {
   function box(w, h, d, color, parent = root, x = 0, y = 0, z = 0) {
     return mesh(new THREE.BoxGeometry(w, h, d), color, parent, x, y, z);
   }
+  function band(from, to, height, color, name) {
+    const positions = [],
+      indices = [],
+      segments = 256;
+    for (let index = 0; index <= segments; index++) {
+      for (const offset of [from, to]) {
+        const point = duelPoint(index / segments, offset);
+        positions.push(point.x, height, point.z);
+      }
+      if (index < segments) {
+        const first = index * 2;
+        indices.push(
+          first,
+          first + 2,
+          first + 1,
+          first + 1,
+          first + 2,
+          first + 3,
+        );
+      }
+    }
+    const first = new THREE.Vector3(...positions.slice(0, 3));
+    const second = new THREE.Vector3(...positions.slice(6, 9));
+    const third = new THREE.Vector3(...positions.slice(3, 6));
+    if (second.sub(first).cross(third.sub(first)).y < 0)
+      for (let index = 0; index < indices.length; index += 3)
+        [indices[index + 1], indices[index + 2]] = [
+          indices[index + 2],
+          indices[index + 1],
+        ];
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const surface = mesh(geometry, color);
+    surface.name = name;
+    surface.castShadow = false;
+    return surface;
+  }
+  band(
+    -halfWidth - 0.35,
+    halfWidth + 0.35,
+    -0.045,
+    "#a5b197",
+    "duel-road-foundation",
+  );
+  // Solid inner and outer sides belong to the course itself, independent of
+  // any surrounding landscape. They share the foundation's exact perimeter.
+  const wallPositions = [],
+    wallIndices = [];
   for (const side of [-1, 1]) {
-    const pipeX = cx + (side * halfWidth) / 2;
-    const curve = new THREE.LineCurve3(
-      new THREE.Vector3(pipeX, -1.66, farZ),
-      new THREE.Vector3(pipeX, -1.66, nearZ),
+    const first = wallPositions.length / 3;
+    for (let index = 0; index <= 256; index++) {
+      const point = duelPoint(index / 256, side * (halfWidth + 0.35));
+      wallPositions.push(point.x, -0.045, point.z, point.x, -1.8, point.z);
+      if (index < 256) {
+        const a = first + index * 2;
+        wallIndices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+    }
+  }
+  const wallGeometry = new THREE.BufferGeometry();
+  wallGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(wallPositions, 3),
+  );
+  wallGeometry.setIndex(wallIndices);
+  wallGeometry.computeVertexNormals();
+  wallGeometry.computeBoundingSphere();
+  const walls = mesh(
+    wallGeometry,
+    new THREE.MeshStandardMaterial({
+      color: "#a5b197",
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+    }),
+  );
+  walls.name = "duel-circuit-walls";
+  walls.castShadow = false;
+  band(-halfWidth, halfWidth, 0.018, "#d7d9bd", "duel-road-surface");
+  band(-halfWidth + 0.13, 0, 0.022, "#d4ddc7", "duel-inner-lane");
+  band(0, halfWidth - 0.13, 0.024, "#ded7c9", "duel-outer-lane");
+  function instances(geometry, color, transforms, name) {
+    const result = new THREE.InstancedMesh(
+      geometry,
+      typeof color === "string" ? mat(color) : color,
+      transforms.length,
     );
-    mesh(
-      new THREE.TubeGeometry(curve, 1, 1.63, 14, false),
-      side < 0 ? "#a9c2b2" : "#c0b7cf",
+    result.name = name;
+    const temporary = new THREE.Object3D();
+    transforms.forEach((transform, index) => {
+      temporary.position.set(transform.x, transform.y, transform.z);
+      temporary.rotation.set(0, transform.heading || 0, 0);
+      temporary.updateMatrix();
+      result.setMatrixAt(index, temporary.matrix);
+    });
+    result.receiveShadow = true;
+    root.add(result);
+    return result;
+  }
+  // Hundreds of curb stones and markings use just a handful of draw calls.
+  for (const side of [-1, 1]) {
+    const points = Array.from({ length: 256 }, (_, index) => {
+      const point = duelPoint(index / 256, side * (halfWidth + 0.045));
+      return new THREE.Vector3(point.x, 0.16, point.z);
+    });
+    const line = mesh(
+      new THREE.TubeGeometry(
+        new THREE.CatmullRomCurve3(points, true),
+        256,
+        0.06,
+        8,
+        true,
+      ),
+      side < 0 ? edgeCyan : edgeViolet,
     );
-    for (const z of [nearZ, farZ]) {
-      mesh(
-        new THREE.CircleGeometry(1.63, 14),
-        new THREE.MeshStandardMaterial({
-          color: side < 0 ? "#a9c2b2" : "#c0b7cf",
-          roughness: 0.9,
-          side: THREE.DoubleSide,
-        }),
-        root,
-        pipeX,
-        -1.66,
-        z,
+    line.name = side < 0 ? "duel-inner-neon" : "duel-outer-neon";
+    line.castShadow = false;
+    line.receiveShadow = false;
+    const count = Math.ceil(DUEL_LENGTH / 1.1);
+    for (const parity of [0, 1]) {
+      const transforms = [];
+      for (let index = parity; index < count; index += 2)
+        transforms.push({
+          ...duelPoint(index / count, side * (halfWidth - 0.08)),
+          y: 0.068,
+        });
+      instances(
+        new THREE.BoxGeometry(0.28, 0.08, 0.72),
+        parity ? "#f4edd8" : "#92a989",
+        transforms,
+        `duel-curb-${side}-${parity}`,
       );
     }
-    box(
-      0.12,
-      0.09,
-      length,
+  }
+  const stripes = Math.round(DUEL_LENGTH / 2.6);
+  instances(
+    new THREE.BoxGeometry(0.075, 0.025, 0.92),
+    "#a8b097",
+    Array.from({ length: stripes }, (_, index) => ({
+      ...duelPoint(index / stripes),
+      y: 0.046,
+    })),
+    "duel-lane-divider",
+  );
+  for (const side of [-1, 1]) {
+    const arrows = [];
+    for (let distance = 10; distance < DUEL_LENGTH - 7; distance += 13) {
+      const point = duelPoint(distance / DUEL_LENGTH, side * laneOffset);
+      for (const arm of [-1, 1])
+        arrows.push({
+          x: point.x + Math.cos(point.heading) * arm * 0.23,
+          z: point.z - Math.sin(point.heading) * arm * 0.23,
+          y: 0.055,
+          heading: point.heading - (arm * Math.PI) / 4,
+        });
+    }
+    instances(
+      new THREE.BoxGeometry(0.11, 0.026, 0.67),
       side < 0 ? cyan : violet,
-      root,
-      cx + side * (halfWidth - 0.025),
-      0.075,
-      centerZ,
+      arrows,
+      `duel-direction-${side}`,
     );
   }
-  box(halfWidth * 2, 0.14, length, "#e5e0c1", root, cx, -0.055, centerZ);
-  for (const side of [-1, 1]) {
-    box(
-      halfWidth - 0.2,
-      0.012,
-      length - 0.18,
-      side < 0 ? "#d9e2c9" : "#e4d9d9",
-      root,
-      cx + (side * halfWidth) / 2,
-      0.022,
-      centerZ,
-    );
-  }
-  for (let z = farZ + 0.6; z < nearZ; z += 1.5)
-    box(0.075, 0.022, 0.65, "#b2b397", root, cx, 0.04, z);
-  for (const z of [startZ, finishZ]) {
-    for (let x = 0; x < 16; x++)
-      for (let row = 0; row < 2; row++) {
-        box(
-          0.38,
-          0.027,
-          0.28,
-          (x + row) % 2 ? white : "#506753",
-          root,
-          cx - 2.85 + x * 0.38,
-          0.055,
-          z + (row ? 0.14 : -0.14),
-        );
-      }
-  }
-  for (const side of [-1, 1]) {
-    for (const z of [10, 1, -8, -17]) {
-      const arrow = new THREE.Group();
-      arrow.position.set(cx + side * laneOffset, 0.055, z);
-      arrow.rotation.y = Math.PI;
-      root.add(arrow);
-      for (const armSide of [-1, 1]) {
-        const arm = box(
-          0.16,
-          0.025,
-          0.82,
-          side < 0 ? cyan : violet,
-          arrow,
-          armSide * 0.265,
-          0,
-          0,
-        );
-        arm.rotation.y = (-armSide * Math.PI) / 4;
-      }
-    }
-    for (const z of [nearZ - 1, 6, -10, farZ + 1]) {
-      mesh(
-        new THREE.CylinderGeometry(0.23, 0.34, 1.6, 8),
-        "#8fa085",
-        root,
-        cx + side * 2,
-        -3.2,
-        z,
-      );
-      box(1.15, 0.15, 1.1, "#b2b79c", root, cx + side * 2, -4.05, z);
-    }
-  }
-  function label(text, sub, x, y, z, width, height, floor = false) {
+  function label(text, sub, parent, x, y, z, width, height, floor = false) {
     const canvas = document.createElement("canvas");
     canvas.width = 1024;
     canvas.height = 256;
@@ -180,11 +249,11 @@ export function createDuelWorld(scene) {
       roughness: 0.85,
       side: THREE.DoubleSide,
     });
-    glowing.push({ material, peak: 0.8 });
+    glowing.push({ material, peak: 0.6 });
     const plane = mesh(
       new THREE.PlaneGeometry(width, height),
       material,
-      root,
+      parent,
       x,
       y,
       z,
@@ -192,61 +261,90 @@ export function createDuelWorld(scene) {
     if (floor) plane.rotation.x = -Math.PI / 2;
     return plane;
   }
-  for (const [z, text, light] of [
-    [startZ, "1 VS 1", cyan],
-    [finishZ, "FINISH", violet],
-  ]) {
-    for (const side of [-1, 1]) {
-      mesh(
-        new THREE.CylinderGeometry(0.12, 0.15, 3.8, 10),
-        "#8b9f83",
-        root,
-        cx + side * (halfWidth + 0.3),
-        1.9,
-        z,
-      );
+  const start = duelPoint(0),
+    gate = new THREE.Group();
+  gate.name = "duel-start-finish-gate";
+  gate.position.set(start.x, 0, start.z);
+  gate.rotation.y = start.heading;
+  root.add(gate);
+  for (const side of [-1, 1]) {
+    const pole = mesh(
+      new THREE.CylinderGeometry(0.13, 0.17, 4.5, 8),
+      "#8c9e81",
+      gate,
+      side * (halfWidth + 0.65),
+      2.25,
+      0,
+    );
+    pole.name = `duel-gate-pole-${side}`;
+    box(
+      0.07,
+      3.6,
+      0.06,
+      side < 0 ? cyan : violet,
+      gate,
+      side * (halfWidth + 0.65),
+      2.25,
+      -0.16,
+    );
+    box(0.5, 0.15, 0.5, "#bfc5a5", gate, side * (halfWidth + 0.65), 0.075, 0);
+  }
+  box(halfWidth * 2 + 1.5, 0.18, 0.2, "#8b9f83", gate, 0, 4.45, 0);
+  box(halfWidth * 2 + 1.4, 0.06, 0.06, white, gate, 0, 4.43, -0.15);
+  label(
+    "AROUND OUR WORLD",
+    `${Math.round(DUEL_LENGTH)} M · ONE LAP · START / FINISH`,
+    gate,
+    0,
+    3.88,
+    -0.15,
+    6.1,
+    0.94,
+  );
+  for (let column = 0; column < 16; column++)
+    for (let row = 0; row < 2; row++)
       box(
-        0.07,
-        2.6,
-        0.06,
-        light,
-        root,
-        cx + side * (halfWidth + 0.3),
-        2,
-        z + 0.16,
+        halfWidth / 8,
+        0.026,
+        0.3,
+        (column + row) % 2 ? white : "#526955",
+        gate,
+        -halfWidth + halfWidth / 16 + (column * halfWidth) / 8,
+        0.065,
+        row ? 0.15 : -0.15,
       );
-      box(
-        0.48,
-        0.16,
-        0.48,
-        "#bfc5a5",
-        root,
-        cx + side * (halfWidth + 0.3),
-        0.08,
-        z,
-      );
-    }
-    box(halfWidth * 2 + 0.8, 0.18, 0.17, "#8b9f83", root, cx, 3.74, z);
-    box(halfWidth * 2 + 0.7, 0.065, 0.05, light, root, cx, 3.77, z + 0.13);
+  for (const side of [-1, 1])
     label(
-      text,
-      z === startZ
-        ? `${DUEL_LENGTH} M · FIRST TO THE LINE`
-        : "A GOOD RACE, A GOOD FRIEND",
-      cx,
-      3.28,
-      z + 0.14,
-      5.8,
-      0.95,
+      side < 0 ? "01" : "02",
+      "",
+      gate,
+      side * laneOffset,
+      0.065,
+      -1.4,
+      1.0,
+      0.8,
+      true,
+    );
+  for (const progress of [0.25, 0.5, 0.75]) {
+    const point = duelPoint(progress, halfWidth + 1.25),
+      sign = new THREE.Group();
+    sign.name = `duel-quarter-sign-${progress}`;
+    sign.position.set(point.x, 0, point.z);
+    sign.rotation.y = point.heading;
+    root.add(sign);
+    for (const x of [-0.65, 0.65])
+      box(0.09, 1.25, 0.1, "#92a183", sign, x, 0.625, 0);
+    label(
+      `${Math.round(progress * 100)}%`,
+      "KEEP GOING, FRIEND",
+      sign,
+      0,
+      1.5,
+      -0.07,
+      1.9,
+      0.75,
     );
   }
-  label("01", "", cx - laneOffset, 0.059, startZ + 1.35, 1.1, 0.9, true);
-  label("02", "", cx + laneOffset, 0.059, startZ + 1.35, 1.1, 0.9, true);
-  for (const distance of [14, 28])
-    label(`${distance} M`, "", cx, 0.062, startZ - distance, 0.8, 0.65, true);
-  // Low end caps identify the recovery margin without placing a wall on the lane.
-  for (const z of [nearZ + 0.12, farZ - 0.12])
-    box(halfWidth * 2, 0.18, 0.16, "#c4bea3", root, cx, -0.02, z);
 
   function clearObstacles() {
     obstacleRoot.traverse((object) => object.geometry?.dispose());
@@ -261,6 +359,9 @@ export function createDuelWorld(scene) {
     const base = new THREE.Group();
     base.name = obstacle.id;
     base.position.set(obstacle.x, 0, obstacle.z);
+    base.rotation.y = Number.isFinite(obstacle.heading)
+      ? obstacle.heading + Math.PI
+      : 0;
     obstacleRoot.add(base);
     const moving = new THREE.Group();
     base.add(moving);
@@ -276,9 +377,13 @@ export function createDuelWorld(scene) {
       return material;
     }
     const jumpPad = obstacle.kind === "jump";
+    const boostPad = obstacle.kind === "boost";
     const trim = paint("#f2ecd4");
-    const dark = paint(jumpPad ? "#528b9e" : "#a46455");
-    const surface = paint(jumpPad ? "#97d7e1" : "#efa485", true);
+    const dark = paint(boostPad ? "#6e8c4f" : jumpPad ? "#528b9e" : "#a46455");
+    const surface = paint(
+      boostPad ? "#b5d978" : jumpPad ? "#97d7e1" : "#efa485",
+      true,
+    );
     const radius = obstacle.r;
     mesh(
       new THREE.CylinderGeometry(radius, radius + 0.06, 0.1, 20),
@@ -288,38 +393,56 @@ export function createDuelWorld(scene) {
       0.07,
       0,
     );
-    // A visible spring makes the two interactive objects distinct from road markings.
-    const springPoints = Array.from({ length: 41 }, (_, index) => {
-      const fraction = index / 40;
-      return new THREE.Vector3(
-        Math.cos(fraction * Math.PI * 8) * radius * 0.28,
-        0.13 + fraction * 0.27,
-        Math.sin(fraction * Math.PI * 8) * radius * 0.28,
+    // Springs distinguish the launch pads; acceleration strips stay low and flat.
+    if (!boostPad) {
+      const springPoints = Array.from({ length: 41 }, (_, index) => {
+        const fraction = index / 40;
+        return new THREE.Vector3(
+          Math.cos(fraction * Math.PI * 8) * radius * 0.28,
+          0.13 + fraction * 0.27,
+          Math.sin(fraction * Math.PI * 8) * radius * 0.28,
+        );
+      });
+      mesh(
+        new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3(springPoints),
+          40,
+          0.035,
+          5,
+          false,
+        ),
+        trim,
+        base,
       );
-    });
-    mesh(
-      new THREE.TubeGeometry(
-        new THREE.CatmullRomCurve3(springPoints),
-        40,
-        0.035,
-        5,
-        false,
-      ),
-      trim,
-      base,
-    );
-    moving.position.y = jumpPad ? 0.35 : 0.46;
+    }
+    moving.position.y = boostPad ? 0.145 : jumpPad ? 0.35 : 0.46;
     mesh(
       new THREE.CylinderGeometry(
         radius * 0.94,
         radius * 0.9,
-        jumpPad ? 0.12 : 0.28,
+        boostPad ? 0.065 : jumpPad ? 0.12 : 0.28,
         20,
       ),
       surface,
       moving,
     );
-    if (jumpPad) {
+    if (boostPad) {
+      for (const z of [-0.5, 0, 0.5])
+        for (const side of [-1, 1]) {
+          const arrow = box(
+            0.14,
+            0.025,
+            0.6,
+            trim,
+            moving,
+            side * 0.18,
+            0.052,
+            z,
+          );
+          arrow.rotation.y = (side * Math.PI) / 4;
+          arrow.name = "duel-boost-chevron";
+        }
+    } else if (jumpPad) {
       const ring = mesh(
         new THREE.TorusGeometry(radius * 0.76, 0.04, 6, 28),
         trim,
@@ -363,7 +486,7 @@ export function createDuelWorld(scene) {
       );
     }
     const flashMaterial = new THREE.MeshBasicMaterial({
-      color: jumpPad ? "#a4e8ff" : "#ffd1a8",
+      color: boostPad ? "#d5f49f" : jumpPad ? "#a4e8ff" : "#ffd1a8",
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -486,11 +609,12 @@ export function createDuelWorld(scene) {
         const age = elapsed - record.lastVisual;
         const wave =
           age >= 0 && age < 1 ? Math.sin(age * 19) * Math.exp(-age * 4.6) : 0;
-        record.moving.position.y = record.height + wave * 0.2;
+        const boost = record.obstacle.kind === "boost";
+        record.moving.position.y = record.height + (boost ? 0 : wave * 0.2);
         record.moving.scale.set(
-          1 + wave * 0.13,
-          1 - wave * 0.28,
-          1 + wave * 0.13,
+          1 + wave * (boost ? 0.04 : 0.13),
+          boost ? 1 : 1 - wave * 0.28,
+          1 + wave * (boost ? 0.04 : 0.13),
         );
         record.surface.emissiveIntensity =
           0.05 + night * 1.5 + Math.max(0, 1 - age / 0.55) * 0.6;

@@ -5,6 +5,8 @@ import {
   trackPoint,
   projectTrack,
   projectDuel,
+  duelPoint,
+  DUEL_LENGTH,
   isDriveable,
 } from "./gameConfig.js";
 
@@ -27,6 +29,31 @@ function alongTrack(start, target) {
   return result;
 }
 
+function alongDuel(start, target) {
+  const from = projectDuel(start.x, start.z);
+  const to = projectDuel(target.x, target.z);
+  const wrapped = (to.progress - from.progress + 1) % 1;
+  const delta = wrapped < 1e-9 || wrapped > 1 - 1e-9 ? 0 : wrapped;
+  const distance = delta * DUEL_LENGTH;
+  const count = Math.max(1, Math.ceil(distance / 0.9));
+  const transition = Math.min(15, distance);
+  const result = [point(duelPoint(from.progress, from.lateralOffset))];
+  for (let index = 1; index <= count; index += 1) {
+    // Depart in the current lane before gradually steering toward the clicked
+    // lane. A centerline waypoint would turn both starting cars into each other.
+    const amount = transition
+      ? Math.min(1, (distance * index) / count / transition)
+      : 1;
+    const blend = amount * amount * (3 - 2 * amount);
+    const offset =
+      from.lateralOffset + (to.lateralOffset - from.lateralOffset) * blend;
+    result.push(
+      point(duelPoint(from.progress + (delta * index) / count, offset)),
+    );
+  }
+  return result;
+}
+
 /** Route the island, narrow connector, and rail without crossing the track hole. */
 export function findWorldPath(start, target, colliders = []) {
   if (
@@ -43,7 +70,7 @@ export function findWorldPath(start, target, colliders = []) {
     if (!startInDuel || !targetInDuel) return [];
     return Math.hypot(start.x - target.x, start.z - target.z) < 0.05
       ? []
-      : [point(target)];
+      : alongDuel(start, target);
   }
   if (!isDriveable(target.x, target.z)) {
     if (Math.abs(target.x) > 22 || target.z < 24 || target.z > 43) return [];

@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createArenaController } from "./arena.js";
 import {
   LAP_REWARD,
   CRATE_COST,
@@ -15,6 +16,7 @@ import {
   TRACK_LENGTH,
   projectTrack,
   DUEL_LENGTH,
+  DUEL_TRACK,
   duelStart,
   projectDuel,
 } from "../src/gameConfig.js";
@@ -29,8 +31,13 @@ const REQUEST_ID = /^[A-Za-z0-9_-]{1,80}$/;
 const TYPES = ["body", "trail", "spray"];
 const MIN_LAP_MS = 2500;
 const LAP_PROGRESS_EPSILON = 1e-9;
-const MIN_DUEL_MS = 2000;
-const RACE_TIMEOUT_MS = 120_000;
+const MIN_DUEL_MS = Math.floor(
+  ((DUEL_LENGTH - 2 * Math.PI * DUEL_TRACK.halfWidth) /
+    DUEL_MOVEMENT_LIMITS.maxSpeed) *
+    800,
+);
+const DUEL_CHECKPOINTS = 16;
+const RACE_TIMEOUT_MS = 180_000;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const secureRandom = () => randomInt(0x100000000) / 0x100000000;
 class GameError extends Error {}
@@ -147,48 +154,80 @@ export function advanceLap(tracker, pose, now) {
 }
 
 export function createDuelTracker(pose, startsAt) {
+  const projected = projectDuel(pose.x, pose.z);
   return {
-    valid: true,
-    last: { ...pose },
+    valid:
+      projected.inside &&
+      Math.min(projected.progress, 1 - projected.progress) < 0.01,
+    finished: false,
+    last: { ...pose, progress: projected.progress },
     lastAt: startsAt,
     startedAt: startsAt,
     progress: 0,
+    unwrapped: 0,
     checkpoint: 1,
     distance: 0,
   };
 }
 
-/** Duel progress uses accepted movement on the separate straight course only. */
+/** One ordered forward circuit; collisions subtract progress without erasing it. */
 export function advanceDuel(tracker, pose, now) {
-  if (!tracker?.valid || now < tracker.startedAt) return false;
+  if (!tracker?.valid || tracker.finished || now < tracker.startedAt)
+    return false;
   const projected = projectDuel(pose.x, pose.z);
   const elapsed = Math.max(0, (now - tracker.lastAt) / 1000);
   const distance = Math.hypot(pose.x - tracker.last.x, pose.z - tracker.last.z);
+  let delta = projected.progress - tracker.last.progress;
+  if (delta < -0.5) delta += 1;
+  if (delta > 0.5) delta -= 1;
   // Match the server's generous catch-up allowance while still rejecting a
   // direct start-to-finish jump, even after a long pause.
   if (
     !projected.inside ||
     now < tracker.lastAt ||
+    Math.abs(delta) > 0.2 ||
     distance > Math.min(30, 6 + elapsed * DUEL_MOVEMENT_LIMITS.maxSpeed) + 0.001
   ) {
     tracker.valid = false;
     return false;
   }
+  // Endpoints on the same loop are insufficient: a chord through its empty
+  // middle must not advance checkpoints, even in direct engine integrations.
+  const steps = Math.ceil(distance / 0.5);
+  for (let step = 1; step < steps; step += 1) {
+    if (
+      !projectDuel(
+        tracker.last.x + ((pose.x - tracker.last.x) * step) / steps,
+        tracker.last.z + ((pose.z - tracker.last.z) * step) / steps,
+      ).inside
+    ) {
+      tracker.valid = false;
+      return false;
+    }
+  }
   tracker.distance += distance;
-  tracker.progress = projected.progress;
-  tracker.last = { ...pose };
+  tracker.unwrapped += delta;
+  tracker.progress = Math.max(0, Math.min(1, tracker.unwrapped));
+  tracker.last = { ...pose, progress: projected.progress };
   tracker.lastAt = now;
   while (
-    tracker.checkpoint <= 8 &&
-    projected.progress >= tracker.checkpoint / 8
+    tracker.checkpoint <= DUEL_CHECKPOINTS &&
+    tracker.unwrapped + LAP_PROGRESS_EPSILON >=
+      tracker.checkpoint / DUEL_CHECKPOINTS
   )
     tracker.checkpoint += 1;
-  return (
-    tracker.checkpoint > 8 &&
-    projected.progress >= 1 &&
-    tracker.distance >= DUEL_LENGTH * 0.95 &&
-    now - tracker.startedAt >= MIN_DUEL_MS
-  );
+  if (
+    tracker.checkpoint <= DUEL_CHECKPOINTS ||
+    tracker.unwrapped + LAP_PROGRESS_EPSILON < 1
+  )
+    return false;
+  const valid =
+    tracker.distance >=
+      (DUEL_LENGTH - 2 * Math.PI * DUEL_TRACK.halfWidth) * 0.95 &&
+    now - tracker.startedAt >= MIN_DUEL_MS;
+  tracker.finished = valid;
+  if (!valid) tracker.valid = false;
+  return valid;
 }
 
 /** One server process owns this database. SQLite commits all coin/escrow changes together. */
@@ -345,6 +384,28 @@ export function createGameEngine({
     throw error;
   }
 
+  let arena;
+  try {
+    arena = createArenaController({
+      db,
+      peers,
+      balance,
+      transaction,
+      profile,
+      refresh,
+      resetLap,
+      teleport,
+      broadcast,
+      now,
+      random,
+      fail,
+      hasRace: (id) => Boolean(raceFor(id)),
+    });
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+
   function attach(player, token) {
     if (closed) fail("서버가 종료 중이에요.", "game_unavailable");
     let resumeToken = token;
@@ -443,6 +504,7 @@ export function createGameEngine({
     if (!peer) return;
     const race = raceFor(playerId);
     try {
+      arena.detach(playerId);
       if (race)
         settle(
           race,
@@ -459,9 +521,10 @@ export function createGameEngine({
     }
   }
 
-  function tick() {
+  function tick(includeArena = true) {
     if (closed) return;
     const time = now();
+    if (includeArena) arena.tick();
     for (const race of [...races.values()]) {
       if (time >= race.expiresAt) {
         settle(race, null, "timeout");
@@ -486,7 +549,8 @@ export function createGameEngine({
   function onMove(playerId, pose) {
     const peer = peers.get(playerId);
     if (!peer || closed) return;
-    tick();
+    tick(false);
+    if (arena.observe(playerId, pose)) return;
     const race = raceFor(playerId);
     if (race?.status === "countdown") return;
     if (race?.status === "racing") {
@@ -516,7 +580,7 @@ export function createGameEngine({
     try {
       if (typeof objectId !== "string" || !objectId.startsWith("duel-"))
         fail("이 대결의 장애물을 선택해 주세요.", "invalid_interaction");
-      tick();
+      tick(false);
       const peer = peers.get(playerId);
       const race = raceFor(playerId);
       if (!peer || !race)
@@ -595,6 +659,10 @@ export function createGameEngine({
       "race:join": ["raceId"],
       "race:cancel": [],
       "race:leave": [],
+      "arena:create": [],
+      "arena:join": ["arenaId"],
+      "arena:start": ["arenaId"],
+      "arena:leave": ["arenaId"],
       spray: [],
     };
     const allowed = Object.hasOwn(fields, data.action)
@@ -654,12 +722,16 @@ export function createGameEngine({
         peer.receipts.delete(peer.receipts.keys().next().value);
     };
     try {
-      tick();
+      tick(false);
       let effect = () => {};
       const result = transaction(() => {
         const current = profile(playerId);
         let details = {};
-        if (data.action === "crate") {
+        if (data.action.startsWith("arena:")) {
+          const planned = arena.plan(playerId, data, time);
+          details = planned.details;
+          effect = planned.effect;
+        } else if (data.action === "crate") {
           if (current.coins < CRATE_COST)
             fail("상자를 열려면 코인 100개가 필요해요.", "insufficient_coins");
           const item = drawItem(random);
@@ -683,6 +755,15 @@ export function createGameEngine({
             !current.inventory.includes(item.id)
           )
             fail("보유한 아이템만 장착할 수 있어요.", "item_not_owned");
+          if (
+            item.type === "body" &&
+            item.id !== current.equipped.body &&
+            (raceFor(playerId) || arena.has(playerId))
+          )
+            fail(
+              "대결을 기다리거나 달리는 동안에는 차체를 바꿀 수 없어요. 대결이 끝난 뒤 변경해 주세요.",
+              "race_body_locked",
+            );
           current.equipped[item.type] = item.id;
           db.prepare("UPDATE accounts SET equipped = ? WHERE id = ?").run(
             JSON.stringify(current.equipped),
@@ -695,7 +776,7 @@ export function createGameEngine({
             data.stake > 10_000
           )
             fail("배팅은 코인 1~10,000개로 정해 주세요.", "invalid_stake");
-          if (raceFor(playerId))
+          if (raceFor(playerId) || arena.has(playerId))
             fail("이미 참가 중인 대결이 있어요.", "already_racing");
           if (current.coins < data.stake)
             fail("배팅할 코인이 부족해요.", "insufficient_coins");
@@ -726,7 +807,7 @@ export function createGameEngine({
           const race = races.get(data.raceId);
           if (!race || race.status !== "waiting" || race.hostId === playerId)
             fail("참가할 수 없는 대결이에요.", "race_unavailable");
-          if (raceFor(playerId))
+          if (raceFor(playerId) || arena.has(playerId))
             fail("이미 참가 중인 대결이 있어요.", "already_racing");
           if (
             [...races.values()].some(
@@ -736,7 +817,7 @@ export function createGameEngine({
             )
           ) {
             fail(
-              "직선 코스에서 다른 대결이 진행 중이에요. 끝난 뒤 참가해 주세요.",
+              "외곽 코스에서 다른 대결이 진행 중이에요. 끝난 뒤 참가해 주세요.",
               "course_busy",
             );
           }
@@ -846,7 +927,11 @@ export function createGameEngine({
           };
         }
         const response = { ...base, ok: true, ...details };
-        if (data.action === "crate" || data.action.startsWith("race:")) {
+        if (
+          data.action === "crate" ||
+          data.action.startsWith("race:") ||
+          data.action.startsWith("arena:")
+        ) {
           db.prepare(
             "INSERT INTO receipts (account_id, request_id, signature, result) VALUES (?, ?, ?, ?)",
           ).run(peer.accountId, requestId, signature, JSON.stringify(response));
@@ -875,6 +960,7 @@ export function createGameEngine({
   function shutdown() {
     if (closed) return;
     try {
+      arena.shutdown();
       for (const race of [...races.values()])
         settle(race, null, "server_restart");
     } finally {
@@ -895,12 +981,23 @@ export function createGameEngine({
     lapProgress,
     tick,
     snapshotRaces,
+    snapshotArenas: arena.snapshot,
+    snapshotArenaHonors: arena.snapshotHonors,
+    arenaFor: arena.arenaFor,
+    canMove: (id) =>
+      arena.canMove(id) &&
+      !(raceFor(id)?.status === "countdown" && now() < raceFor(id).startsAt),
+    interactArena: arena.interact,
     shutdown,
     beforeTeleport: (id) =>
-      !["countdown", "racing"].includes(raceFor(id)?.status),
+      !["countdown", "racing"].includes(raceFor(id)?.status) &&
+      (!arena.arenaFor(id) || arena.arenaFor(id).status === "waiting"),
     isLocked: (id) => {
       const race = raceFor(id);
-      return race?.status === "countdown" && now() < race.startsAt;
+      return (
+        !arena.canMove(id) ||
+        (race?.status === "countdown" && now() < race.startsAt)
+      );
     },
     recentSprays: () =>
       sprays

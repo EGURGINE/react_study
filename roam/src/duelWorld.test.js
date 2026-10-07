@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as THREE from "three";
 import { createDuelWorld } from "./duelWorld.js";
 import { DUEL_OBSTACLE_RULES } from "./duelObstacles.js";
+import { DUEL_TRACK, duelPoint, projectDuel } from "./gameConfig.js";
 
 const raceFixture = (status = "racing", id = "race-1") => ({
   id,
@@ -10,12 +11,11 @@ const raceFixture = (status = "racing", id = "race-1") => ({
   hostId: "host",
   guestId: "guest",
   obstacles: [0, 1].flatMap((lane) =>
-    ["jump", "bounce"].map((kind, index) => ({
+    ["jump", "bounce", "boost"].map((kind, index) => ({
       id: `${id}-${lane}-${kind}`,
       kind,
       lane,
-      x: lane === 0 ? -32.75 : -29.25,
-      z: index === 0 ? 8 : -6,
+      ...duelPoint([0.12, 0.35, 0.6][index], lane === 0 ? -1.75 : 1.75),
       r: DUEL_OBSTACLE_RULES[kind].r,
     })),
   ),
@@ -78,7 +78,7 @@ test("jumping over obstacles avoids them while changing lanes keeps collisions a
   const race = raceFixture();
   world.setRace(race, "host");
   const local = race.obstacles[0];
-  const opponent = race.obstacles[2];
+  const opponent = race.obstacles.find((item) => item.lane === 1);
   assert.equal(
     world.hit(
       { ...local, y: DUEL_OBSTACLE_RULES.jump.maxTriggerHeight + 0.01 },
@@ -145,4 +145,85 @@ test("race resolution removes obstacles and disposes their private resources", (
   );
   world.setRace(next, "spectator");
   assert.equal(root.children.length, 0);
+});
+
+test("boost strips stay flat, show directional chevrons, and use independent cooldowns", (t) => {
+  const { world, scene } = fixture(t);
+  const race = raceFixture();
+  const pad = race.obstacles.find((item) => item.kind === "boost");
+  world.setRace(race, "host");
+  const object = scene.getObjectByName(pad.id);
+  const arrows = [];
+  object.traverse((child) => {
+    if (child.name === "duel-boost-chevron") arrows.push(child);
+  });
+  assert.equal(arrows.length, 6);
+  object.updateWorldMatrix(true, true);
+  const before = new THREE.Box3().setFromObject(object);
+  assert.ok(
+    before.max.y < 0.25,
+    "acceleration strips have no raised spring or bumper",
+  );
+  assert.equal(world.play(pad.id, 10, true, race.id), true);
+  assert.equal(world.hit({ ...pad, y: 0 }, 6, 10)?.id, pad.id);
+  assert.equal(world.play(pad.id, 10), true);
+  assert.equal(world.hit({ ...pad, y: 0 }, 6, 10.5), null);
+  world.setNight(1);
+  world.update(0.016, 10.2);
+  object.updateWorldMatrix(true, true);
+  assert.ok(new THREE.Box3().setFromObject(object).max.y < 0.25);
+  assert.equal(world.hit({ ...pad, y: 0 }, 6, 11.71)?.id, pad.id);
+});
+
+test("closed circuit surface follows the shared road bounds and has no seam", (t) => {
+  const { scene } = fixture(t);
+  const road = scene.getObjectByName("duel-road-surface");
+  const positions = road.geometry.getAttribute("position");
+  const normals = road.geometry.getAttribute("normal");
+  const segments = positions.count / 2 - 1;
+  for (let index = 0; index <= segments; index++) {
+    for (const [side, offset] of [
+      -DUEL_TRACK.halfWidth,
+      DUEL_TRACK.halfWidth,
+    ].entries()) {
+      const expected = duelPoint(index / segments, offset);
+      const vertex = index * 2 + side;
+      assert.ok(Math.abs(positions.getX(vertex) - expected.x) < 0.00001);
+      assert.ok(Math.abs(positions.getZ(vertex) - expected.z) < 0.00001);
+      assert.ok(normals.getY(vertex) > 0.99, "road faces upward");
+    }
+  }
+  for (let side = 0; side < 2; side++) {
+    assert.equal(positions.getX(side), positions.getX(segments * 2 + side));
+    assert.equal(positions.getZ(side), positions.getZ(segments * 2 + side));
+  }
+  road.geometry.computeBoundingBox();
+  assert.ok(road.geometry.boundingBox.min.z < -22);
+  assert.ok(road.geometry.boundingBox.max.z > 43);
+});
+
+test("one start-finish gate leaves the full road clear and long markings are instanced", (t) => {
+  const { scene } = fixture(t);
+  scene.updateMatrixWorld(true);
+  const gates = [],
+    instanced = [];
+  let meshCount = 0;
+  scene.traverse((object) => {
+    if (object.name === "duel-start-finish-gate") gates.push(object);
+    if (object.isInstancedMesh) instanced.push(object);
+    if (object.isMesh) meshCount++;
+  });
+  assert.equal(gates.length, 1);
+  for (const side of [-1, 1]) {
+    const pole = scene.getObjectByName(`duel-gate-pole-${side}`);
+    const point = pole.getWorldPosition(new THREE.Vector3());
+    assert.ok(
+      projectDuel(point.x, point.z).distance > DUEL_TRACK.halfWidth + 0.3,
+    );
+  }
+  assert.ok(instanced.reduce((sum, object) => sum + object.count, 0) > 250);
+  assert.ok(
+    meshCount < 90,
+    "long course should not create hundreds of static draw calls",
+  );
 });

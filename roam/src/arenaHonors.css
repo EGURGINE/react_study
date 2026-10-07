@@ -1,0 +1,287 @@
+.social-app .arena-champion {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  max-width: min(245px, 70vw);
+  padding: 9px 12px;
+  border-radius: 11px;
+  white-space: normal;
+}
+.social-app .arena-champion.has-champion {
+  min-width: 177px;
+  padding-top: 13px;
+}
+.arena-champion-name {
+  text-align: center;
+}
+.arena-champion-name > small {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--ui-muted);
+  font-size: 9px;
+}
+.arena-champion-name > strong {
+  display: block;
+  max-width: 220px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-ink);
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.5px;
+}
+.arena-champion-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.arena-champion-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 3px 0;
+  color: var(--ui-accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.arena-champion-actions button + button {
+  padding-left: 10px;
+  border-left: 1px solid var(--ui-border);
+}
+.social-app .arena-champion-actions button svg {
+  color: currentColor;
+}
+.social-app .arena-spectator-actions {
+  position: absolute;
+  z-index: 4;
+  left: 53%;
+  bottom: 142px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.social-app .arena-spectator-actions .arena-spectator-exit {
+  position: static;
+  transform: none;
+}
+.arena-spectator-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 22px;
+  background: var(--ui-panel);
+  color: var(--ui-accent);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.play-honors-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 12px;
+  padding: 3px 0;
+  color: var(--ui-accent);
+  font-size: 10px;
+}
+.honors-latest {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  padding: 23px;
+  margin: 25px 0;
+  border: 1px solid color-mix(in srgb, var(--ui-border) 60%, #bba36b);
+  border-radius: 15px;
+  color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-panel) 94%, #ccb267);
+}
+.honors-latest > div {
+  flex: 1;
+  min-width: 0;
+}
+.honors-latest small,
+.honors-latest time {
+  display: block;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.honors-latest strong {
+  display: block;
+  margin: 6px 0;
+  color: var(--ui-ink);
+  font-size: 26px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.honors-latest > span {
+  flex-shrink: 0;
+  font-size: 22px;
+  text-align: right;
+}
+.honors-latest > span small {
+  margin-top: 5px;
+}
+.honors-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 12px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.honors-heading button,
+.honors-error button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 0;
+  color: var(--ui-accent);
+  font-size: 10px;
+}
+.arena-honors-panel h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 550;
+}
+.honors-ranking,
+.honors-recent {
+  margin-top: 28px;
+}
+.honors-ranking ol,
+.honors-recent ol {
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+.honors-ranking li,
+.honors-recent li {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--ui-border);
+}
+.honors-ranking li > strong,
+.honors-recent li > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.honors-ranking strong,
+.honors-recent strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.honors-rank {
+  width: 27px;
+  color: var(--ui-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.honors-ranking li:first-child .honors-rank {
+  color: var(--ui-accent);
+  font-weight: 700;
+}
+.honors-wins {
+  color: var(--ui-accent);
+  font-size: 18px;
+}
+.honors-wins small,
+.honors-recent li > span small {
+  margin-left: 5px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.honors-recent li > svg,
+.honors-recent li > span {
+  flex-shrink: 0;
+  color: var(--ui-accent);
+  font-size: 12px;
+}
+.honors-recent time {
+  display: block;
+  margin-top: 6px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.honors-loading,
+.honors-error,
+.honors-empty {
+  margin: 22px 0;
+  padding: 20px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  line-height: 1.9;
+  text-align: center;
+}
+.honors-empty {
+  padding: 32px 12px;
+}
+.honors-empty > svg {
+  color: var(--ui-accent);
+  margin-bottom: 16px;
+}
+.honors-error p {
+  margin: 0 0 5px;
+}
+@media (max-width: 760px) {
+  .social-app .arena-champion {
+    max-width: 210px;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+  .social-app .arena-champion.has-champion {
+    min-width: 160px;
+    padding-top: 9px;
+  }
+  .arena-champion-name > strong {
+    max-width: 186px;
+    font-size: 19px;
+  }
+  .arena-champion-actions button {
+    min-height: 32px;
+  }
+  .social-app .arena-spectator-actions {
+    left: 22px;
+    bottom: 135px;
+    transform: none;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: calc(100vw - 165px);
+  }
+  .social-app .arena-spectator-actions .arena-spectator-exit {
+    padding: 10px 12px;
+    font-size: 11px;
+  }
+  .arena-spectator-history {
+    padding: 9px;
+  }
+  .honors-latest {
+    padding: 18px 14px;
+    gap: 12px;
+  }
+  .honors-latest > svg {
+    display: none;
+  }
+  .honors-latest strong {
+    font-size: 23px;
+  }
+  .honors-latest > span {
+    font-size: 19px;
+  }
+  .honors-ranking strong,
+  .honors-recent strong {
+    font-size: 12px;
+  }
+}

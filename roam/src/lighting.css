@@ -8,7 +8,13 @@
   color: var(--ui-ink);
 }
 .social-app[data-time-of-day] .world-gradient {
-  background: var(--sky-color);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--sky-color) 76%, white) 0%,
+    var(--sky-color) 15%,
+    var(--sky-mid) 62%,
+    var(--sky-bottom) 100%
+  );
 }
 .social-app[data-time-of-day] :is(.header, footer) {
   border-color: var(--ui-border);
@@ -18,7 +24,6 @@
     .wordmark,
     .header nav button,
     .sound-button,
-    .intro h1,
     .modal h2,
     .modal h3,
     .map-destination,
@@ -31,7 +36,6 @@
 .social-app[data-time-of-day]
   :is(
     .wordmark > span,
-    .intro h1 em,
     .chat-spark,
     .chat-welcome,
     .crate-copy h3,
@@ -43,9 +47,6 @@
 .social-app[data-time-of-day]
   :is(
     .wordmark i,
-    .intro > p,
-    .intro-note,
-    .eyebrow,
     .modal-eyebrow,
     .modal-intro,
     footer,
@@ -101,9 +102,7 @@
   color: var(--ui-ink);
   background: var(--ui-panel);
   border-color: var(--ui-border);
-  transition:
-    background-color 2s ease,
-    border-color 2s ease;
+  transition: none;
 }
 .social-app[data-time-of-day] .modal::backdrop {
   background: color-mix(in srgb, var(--sky-color, #53694e) 42%, transparent);
@@ -282,23 +281,14 @@
   font-size: 10px;
 }
 .social-app[data-time-of-day]
-  :is(.wordmark, .header nav button, .sound-button, .intro h1) {
+  :is(.wordmark, .header nav button, .sound-button) {
   color: var(--ui-scene-ink);
 }
 .social-app[data-time-of-day]
-  :is(
-    .wordmark i,
-    .intro > p,
-    .intro-note,
-    .eyebrow,
-    footer,
-    .compass,
-    .daytime-indicator
-  ) {
+  :is(.wordmark i, footer, .compass, .daytime-indicator) {
   color: var(--ui-scene-muted);
 }
-.social-app[data-time-of-day]
-  :is(.wordmark > span, .intro h1 em, .daytime-indicator > svg) {
+.social-app[data-time-of-day] :is(.wordmark > span, .daytime-indicator > svg) {
   color: var(--ui-scene-accent);
 }
 .daytime-indicator > svg {
@@ -308,7 +298,274 @@
   font-size: 9px;
   margin-left: 7px;
 }
+.social-app[data-time-of-day] :is(footer, .daytime-indicator) {
+  color: var(--ui-footer-muted);
+}
+.social-app[data-time-of-day] footer .daytime-indicator {
+  color: var(--ui-footer-ink);
+}
+.social-app[data-time-of-day] footer .daytime-indicator > small {
+  color: var(--ui-footer-muted);
+}
+.social-app[data-time-of-day] .daytime-indicator > svg {
+  color: var(--ui-footer-ink);
+}
+.local-drive-banner {
+  position: absolute;
+  z-index: 4;
+  top: 128px;
+  left: 46px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 92px);
+  padding: 10px 14px;
+  border-radius: 14px;
+  color: var(--ui-ink);
+  background: var(--ui-panel);
+  border: 1px solid var(--ui-border);
+  font-size: 12px;
+}
+.local-drive-banner a {
+  color: var(--ui-accent);
+}
+.time-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: var(--ui-ink);
+}
+.time-pill {
+  --time-disc-size: 28px;
+  --time-inset: 5px;
+  position: relative;
+  width: 152px;
+  height: 40px;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 30px;
+  border: 1px solid var(--ui-border);
+  background: color-mix(
+    in srgb,
+    var(--ui-panel) 46%,
+    color-mix(in srgb, #b7c8bd, #d1b294 var(--time-dusk))
+  );
+}
+.time-pill-night {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--ui-panel) 76%, #7b919c);
+  opacity: var(--time-night);
+}
+.time-pill-halo,
+.time-pill-disc {
+  position: absolute;
+  left: calc(
+    var(--time-inset) + (100% - var(--time-inset) * 2 - var(--time-disc-size)) *
+      var(--time-progress)
+  );
+  top: var(--time-inset);
+  width: var(--time-disc-size);
+  height: var(--time-disc-size);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.time-pill-halo {
+  box-shadow:
+    0 0 0 10px rgb(248 246 238 / 9%),
+    0 0 0 22px rgb(248 246 238 / 5%);
+}
+.time-pill-clouds,
+.time-pill-stars {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.time-pill-clouds {
+  fill: #f8f6ee;
+  opacity: calc((1 - var(--time-night)) * 0.55);
+}
+.time-pill-stars {
+  fill: #dce1d3;
+  opacity: calc(var(--time-night) * 0.6);
+}
+.time-pill-disc {
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, #efdfae, #deb895 var(--time-dusk)),
+    #d6ddd3 var(--time-night-blend)
+  );
+  box-shadow: 0 1px 2px rgb(35 48 38 / 12%);
+}
+.time-pill-craters {
+  position: absolute;
+  inset: 0;
+  opacity: var(--time-night);
+}
+.time-pill-craters i {
+  position: absolute;
+  border-radius: 50%;
+  background: #aab8b3;
+}
+.time-pill-craters i:nth-child(1) {
+  left: 5px;
+  top: 9px;
+  width: 8px;
+  height: 8px;
+}
+.time-pill-craters i:nth-child(2) {
+  left: 17px;
+  top: 5px;
+  width: 4px;
+  height: 4px;
+}
+.time-pill-craters i:nth-child(3) {
+  left: 16px;
+  top: 18px;
+  width: 5px;
+  height: 5px;
+}
+.time-pill-input {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: var(--time-inset);
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: calc(100% - var(--time-inset) * 2);
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: pan-y;
+}
+.time-pill-input:active {
+  cursor: grabbing;
+}
+.time-pill-input::-webkit-slider-runnable-track {
+  height: var(--time-disc-size);
+  border: 0;
+  background: transparent;
+}
+.time-pill-input::-moz-range-track {
+  height: var(--time-disc-size);
+  border: 0;
+  background: transparent;
+}
+.time-pill-input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: var(--time-disc-size);
+  height: var(--time-disc-size);
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.time-pill-input::-moz-range-thumb {
+  width: var(--time-disc-size);
+  height: var(--time-disc-size);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+.time-pill:has(.time-pill-input:focus-visible) {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}
+.time-pill-input:focus-visible {
+  outline: none;
+}
+.time-auto {
+  width: 50px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--ui-border);
+  border-radius: 30px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ui-ink);
+  background: var(--ui-panel);
+}
+.time-auto[aria-pressed="true"] {
+  border-color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-panel) 90%, var(--ui-accent));
+  color: var(--ui-ink);
+}
+.time-auto:hover {
+  border-color: var(--ui-accent);
+}
+.time-auto:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 3px;
+}
+.social-app .header-right {
+  gap: 15px;
+}
+@media (max-width: 1160px) {
+  .social-app .wordmark i {
+    display: none;
+  }
+  .social-app .header nav {
+    margin-left: 12px;
+    gap: 16px;
+  }
+  .social-app .header-right {
+    gap: 7px;
+  }
+}
+@media (max-width: 900px) {
+  .social-app .header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: 43px 65px;
+    align-content: center;
+    column-gap: 20px;
+    height: 124px;
+  }
+  .social-app .header-right {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+    gap: 12px;
+  }
+  .social-app .header nav {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-end;
+    margin: 0;
+    gap: 19px;
+  }
+  .social-app .header nav button {
+    padding: 6px 0;
+  }
+  .social-app .top-right-tools {
+    top: 137px;
+  }
+  .social-app :is(.rail-status, .race-hud) {
+    top: 184px;
+  }
+  .local-drive-banner {
+    top: 145px;
+  }
+}
 @media (max-width: 760px) {
+  .social-app .header-right {
+    justify-self: stretch;
+    gap: 6px;
+  }
+  .time-control {
+    margin-left: auto;
+  }
   .social-app[data-time-of-day] .daytime-indicator {
     gap: 5px;
     font-size: 9px;
@@ -319,6 +576,33 @@
   .daytime-indicator > svg {
     width: 12px;
     height: 12px;
+  }
+}
+@media (max-width: 399px) {
+  .time-control {
+    gap: 8px;
+  }
+  .time-pill {
+    width: 140px;
+  }
+  .time-auto {
+    width: 46px;
+  }
+}
+@media (max-width: 359px) {
+  .social-app .header {
+    margin-left: 15px;
+    margin-right: 15px;
+    column-gap: 5px;
+  }
+  .social-app .header .wordmark {
+    font-size: 29px;
+  }
+  .time-control {
+    gap: 7px;
+  }
+  .time-pill {
+    width: 130px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
