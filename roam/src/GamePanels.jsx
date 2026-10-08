@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { createSprayCanvas } from "./cosmeticsWorld.js";
 import { getVehicleProfile } from "./vehicleDynamics.js";
+import { getFuelEconomy } from "./fuelConfig.js";
 import { ARENA } from "./arenaConfig.js";
 import {
   CRATE_COST,
@@ -364,13 +365,15 @@ function CarArt({ item }) {
 
 function VehicleStats({ item, equippedId }) {
   if (item.type !== "body") return null;
-  const profile = getVehicleProfile(item);
-  const baseline = getVehicleProfile(equippedId);
+  const profile = { ...getVehicleProfile(item), ...getFuelEconomy(item.id) };
+  const baseline = { ...getVehicleProfile(equippedId), ...getFuelEconomy(equippedId) };
   const metrics = [
     { key: "topSpeed", label: "최고속도", scale: 5, digits: 1 },
     { key: "acceleration", label: "가속력", scale: 1, digits: 1 },
     { key: "steering", label: "핸들링", scale: 1, digits: 2 },
     { key: "mass", label: "충돌 버팀", scale: 1, digits: 2, suffix: "×" },
+    { key: "efficiency", label: "연료 효율", scale: 1, digits: 2, suffix: "×" },
+    { key: "boostSeconds", label: "만충 가속", scale: 1, digits: 1, suffix: "초" },
   ];
   return (
     <div className="vehicle-profile">
@@ -408,6 +411,9 @@ function VehicleStats({ item, equippedId }) {
           );
         })}
       </dl>
+      <p className="vehicle-description">
+        Shift 초당 {profile.consumptionRate.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} 연료 · 평소 주행과 가속 패드는 무료
+      </p>
     </div>
   );
 }
@@ -417,7 +423,7 @@ export function Wallet({ coins = 0, onClick, compact = false }) {
     <button
       className={`game-wallet ${compact ? "compact" : ""}`}
       onClick={onClick}
-      aria-label={`보유 코인 ${number(coins)}개, 차고지 열기`}
+      aria-label={`보유 코인 ${number(coins)}개, 정비소 열기`}
     >
       <Coins size={17} />
       <strong>{number(coins)}</strong>
@@ -526,13 +532,13 @@ export function GaragePanel({ multiplayer, onJoin, onTrack }) {
   return (
     <div className="game-panel garage-panel">
       <div className="modal-eyebrow">
-        <Wrench size={15} /> 02 / MY LITTLE GARAGE
+        <Wrench size={15} /> 02 / LITTLE CUSTOM SHOP
       </div>
       <div className="game-title-row">
         <h2 id="modal-title">
           내 취향을 싣는
           <br />
-          차고지.
+          정비소.
         </h2>
         <span className="garage-wallet">
           <Coins size={18} />

@@ -1,5 +1,13 @@
 import { findPath } from "./navigation.js";
 import {
+  garagePoint,
+  isGarageDriveable,
+  garageDoorContact,
+  garageWallContact,
+  garageWallSegments,
+  FUEL,
+} from "./fuelConfig.js";
+import {
   TRACK,
   TRACK_LENGTH,
   trackPoint,
@@ -55,7 +63,7 @@ function alongDuel(start, target) {
 }
 
 /** Route the island, narrow connector, and rail without crossing the track hole. */
-export function findWorldPath(start, target, colliders = []) {
+function findCorePath(start, target, colliders = []) {
   if (
     !start ||
     !target ||
@@ -120,5 +128,64 @@ export function findWorldPath(start, target, colliders = []) {
   return path.filter((next, index) => {
     const previous = index ? path[index - 1] : start;
     return Math.hypot(next.x - previous.x, next.z - previous.z) > 0.04;
+  });
+}
+
+/** Occupied personal garages connect through their inward bridge, never over the rim. */
+export function findWorldPath(start, target, colliders = [], options = {}) {
+  if (!start || !target) return [];
+  const garages = options.garages || [];
+  const atGarage = (pose) =>
+    garages.find((garage) => isGarageDriveable(pose.x, pose.z, garage.slot));
+  const walls = garages.flatMap((garage) =>
+    garageWallSegments(garage.slot).map((wall) => ({
+      x: (wall.ax + wall.bx) / 2,
+      z: (wall.az + wall.bz) / 2,
+      r:
+        FUEL.wallThickness / 2 +
+        Math.hypot(wall.bx - wall.ax, wall.bz - wall.az) / 2,
+    })),
+  );
+  const obstacles = [...colliders, ...walls];
+  const fromGarage = atGarage(start),
+    toGarage = atGarage(target);
+  if (!fromGarage && !toGarage) return findCorePath(start, target, obstacles);
+  const entrance = (garage) =>
+    garagePoint(garage.slot, 0, FUEL.bridgeStart - FUEL.radius - 0.1);
+  const interior = (garage) => garagePoint(garage.slot, 0, -1);
+  const path = [];
+  if (fromGarage?.ownerId === toGarage?.ownerId && fromGarage) {
+    path.push(interior(fromGarage), point(target));
+  } else {
+    const from = fromGarage ? entrance(fromGarage) : start;
+    const to = toGarage ? entrance(toGarage) : target;
+    if (fromGarage) path.push(interior(fromGarage), from);
+    const middle = findCorePath(from, to, obstacles);
+    if (!middle.length && Math.hypot(from.x - to.x, from.z - to.z) > 0.05)
+      return [];
+    path.push(...middle);
+    if (toGarage) path.push(interior(toGarage), point(target));
+  }
+  let previous = start;
+  for (const next of path) {
+    if (
+      garages.some(
+        (garage) =>
+          garageWallContact(previous, next, garage) ||
+          garageDoorContact(
+            previous,
+            next,
+            garage,
+            options.playerId,
+            options.now ?? Date.now(),
+          ),
+      )
+    )
+      return [];
+    previous = next;
+  }
+  return path.filter((next, index) => {
+    const before = index ? path[index - 1] : start;
+    return Math.hypot(next.x - before.x, next.z - before.z) > 0.04;
   });
 }

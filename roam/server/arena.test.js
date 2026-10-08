@@ -645,7 +645,7 @@ test("arena escrow survives abrupt process exit and recovers each stake once; gr
     assert.equal(room.attach(0, token, again).profile.coins, 20);
 });
 
-test("real WebSocket arena validates forty-speed travel, rails, shared strong impacts, spectating and one payout", async (t) => {
+test("real WebSocket arena validates verified high-speed effects, rails, shared strong impacts, spectating and one payout", async (t) => {
   const room = fixture(t);
   const identities = [
     room.attach(),
@@ -777,7 +777,7 @@ test("real WebSocket arena validates forty-speed travel, rails, shared strong im
     const from = { ...peer.player };
     const count = Math.max(
       1,
-      Math.ceil(Math.hypot(target.x - from.x, target.z - from.z) / 2.8),
+      Math.ceil(Math.hypot(target.x - from.x, target.z - from.z) / 0.6),
     );
     for (let step = 1; step <= count; step++) {
       await sleep(90);
@@ -827,6 +827,12 @@ test("real WebSocket arena validates forty-speed travel, rails, shared strong im
         (arena) => arena.id === arenaId && arena.status === "running",
       ),
   );
+  const pad = started.obstacles[0];
+  await moveTo(host, pad);
+  host.send({ type: "interaction", objectId: pad.id });
+  await host.wait((m) => m.type === "interaction" && m.objectId === pad.id);
+  // Combined engine and obstacle impulses can reach the arena's 38 m/s cap.
+  // Grant that budget through a real accepted pad, not free manual boosting.
   await moveTo(host, { x: ARENA.cx + 3, z: ARENA.cz });
   let last;
   for (let step = 1; step <= 8; step++) {

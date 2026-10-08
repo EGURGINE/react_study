@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createArenaController } from "./arena.js";
 import { createAttendanceController } from "./attendance.js";
 import { createSoccerController } from "./soccer.js";
+import { createFuelController } from "./fuel.js";
 import {
   LAP_REWARD,
   CRATE_COST,
@@ -391,6 +392,7 @@ export function createGameEngine({
 
   let arena;
   let soccer;
+  let fuel;
   try {
     arena = createArenaController({
       db,
@@ -415,6 +417,16 @@ export function createGameEngine({
       now,
       fail,
       hasOtherGame: (id) => Boolean(raceFor(id) || arena.has(id)),
+    });
+    fuel = createFuelController({
+      db,
+      peers,
+      transaction,
+      broadcast,
+      teleport,
+      now,
+      fail,
+      inGame: (id) => Boolean(raceFor(id) || arena.has(id) || soccer.has(id)),
     });
   } catch (error) {
     db.close();
@@ -464,6 +476,7 @@ export function createGameEngine({
     const current = publicProfile(row);
     player.cosmetics = { ...current.equipped };
     reportLap(player.id);
+    fuel.attach(player.id);
     return { profile: current, resumeToken };
   }
 
@@ -519,6 +532,7 @@ export function createGameEngine({
     if (!peer) return;
     const race = raceFor(playerId);
     try {
+      fuel.detach(playerId);
       soccer.detach(playerId);
       arena.detach(playerId);
       if (race)
@@ -540,6 +554,7 @@ export function createGameEngine({
   function tick(includeArena = true) {
     if (closed) return;
     const time = now();
+    fuel.tick();
     soccer.tick();
     if (includeArena) arena.tick();
     for (const race of [...races.values()]) {
@@ -688,6 +703,8 @@ export function createGameEngine({
       "soccer:team": ["soccerId", "team"],
       "soccer:start": ["soccerId"],
       "soccer:leave": ["soccerId"],
+      "fuel:steal": ["targetId"],
+      "fuel:cancel": [],
       spray: [],
     };
     const allowed = Object.hasOwn(fields, data.action)
@@ -732,7 +749,7 @@ export function createGameEngine({
       peer.windowAt = time;
       peer.windowCount = 0;
     }
-    if (++peer.windowCount > 8)
+    if (++peer.windowCount > 8 && data.action !== "fuel:cancel")
       return {
         ...base,
         ok: false,
@@ -756,7 +773,11 @@ export function createGameEngine({
       const result = transaction(() => {
         const current = profile(playerId);
         let details = {};
-        if (data.action === "attendance:claim") {
+        if (data.action.startsWith("fuel:")) {
+          const planned = fuel.plan(playerId, data, time);
+          details = planned.details;
+          effect = planned.effect;
+        } else if (data.action === "attendance:claim") {
           details = attendance.claim(peer.accountId, time);
         } else if (data.action.startsWith("soccer:")) {
           const planned = soccer.plan(playerId, data, time);
@@ -967,6 +988,7 @@ export function createGameEngine({
           data.action === "attendance:claim" ||
           data.action.startsWith("race:") ||
           data.action.startsWith("soccer:") ||
+          data.action.startsWith("fuel:") ||
           data.action.startsWith("arena:")
         ) {
           db.prepare(
@@ -977,6 +999,8 @@ export function createGameEngine({
       });
       remember(result);
       effect();
+      if (raceFor(playerId) || arena.has(playerId) || soccer.has(playerId))
+        fuel.returnCargo(playerId);
       refresh(playerId);
       return { ...result, profile: profile(playerId) };
     } catch (error) {
@@ -997,6 +1021,7 @@ export function createGameEngine({
   function shutdown() {
     if (closed) return;
     try {
+      fuel.shutdown();
       soccer.shutdown();
       arena.shutdown();
       for (const race of [...races.values()])
@@ -1022,6 +1047,14 @@ export function createGameEngine({
     snapshotArenas: arena.snapshot,
     snapshotArenaHonors: arena.snapshotHonors,
     snapshotSoccer: soccer.snapshot,
+    snapshotFuel: fuel.snapshot,
+    observeFuel: fuel.observe,
+    repositionFuel: fuel.reposition,
+    fuelTank: fuel.tank,
+    fuelDriveable: fuel.driveable,
+    fuelDoorContact: fuel.doorContact,
+    dropFuel: fuel.impact,
+    returnFuel: fuel.returnCargo,
     soccerFor: soccer.soccerFor,
     arenaFor: arena.arenaFor,
     canMove: (id) =>

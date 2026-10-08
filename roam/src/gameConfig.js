@@ -34,9 +34,10 @@ export const CONNECTOR = Object.freeze({
 });
 export const DUEL_TRACK = Object.freeze({
   cx: 0,
-  cz: 10,
-  radius: 32,
-  halfStraight: 8,
+  // Extend the rear arc away from garage walls without moving the coin-loop end.
+  cz: 8,
+  radius: 34.5,
+  halfStraight: 10,
   halfWidth: 3.2,
   laneOffset: 1.25,
 });

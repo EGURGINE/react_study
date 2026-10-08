@@ -1154,12 +1154,14 @@ test("real WebSocket outer duel drives a full loop in both lanes, pays only the 
   const finished = host.wait(
     (packet) =>
       packet.type === "race:finish" && packet.result.raceId === created.race.id,
-    35000,
+    45000,
   );
   const activated = new Set();
   let lastJumpStep = -100;
   for (let step = 0; step <= 240; step += 1) {
-    if (step) await new Promise((resolve) => setTimeout(resolve, 80));
+    // A full lap lasts longer than the starter tank. Drive at its ordinary
+    // speed rather than silently assuming unlimited manual boost fuel.
+    if (step) await new Promise((resolve) => setTimeout(resolve, 130));
     const progress = step / 240;
     const pose = duelPoint(progress, -DUEL_TRACK.laneOffset);
     const airStep = step - lastJumpStep;

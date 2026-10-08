@@ -38,6 +38,7 @@ import {
   History,
   Eye,
   CircleDot,
+  Zap,
 } from "lucide-react";
 import { createWorld, ZONES } from "./world.js";
 import { useMultiplayer } from "./multiplayer.js";
@@ -48,7 +49,9 @@ import { ArenaChampion, ArenaHonorsPanel } from "./ArenaHonors.jsx";
 import { AttendanceButton, AttendancePanel } from "./AttendancePanel.jsx";
 import { FloatingChat } from "./FloatingChat.jsx";
 import { SoccerPanel, SoccerHud } from "./SoccerPanel.jsx";
+import { FuelHud } from "./FuelHud.jsx";
 import { SOCCER } from "./soccerConfig.js";
+import { FUEL, garageSlot, garagePoint } from "./fuelConfig.js";
 import {
   GaragePanel,
   ArenaPanel,
@@ -224,13 +227,22 @@ const circuitOutlinePath = `${mapPath(circuitOuter)} ${mapPath(circuitInner)}`;
 const circuitCenterPath = mapPath(mapCircuit(0));
 const circuitStartPath = `M${circuitStart[0].x} ${circuitStart[0].y}L${circuitStart[1].x} ${circuitStart[1].y}`;
 
-function MiniMap({ state, onSelect, large = false, peers = [], arena = null }) {
+function MiniMap({
+  state,
+  onSelect,
+  large = false,
+  peers = [],
+  arena = null,
+  garages = [],
+  playerId,
+  onDriveHome,
+}) {
   const arenaRadius = arena?.radius || ARENA.minRadius;
   return (
     <div className={`minimap ${large ? "large-map" : ""}`}>
       <svg
         viewBox={mapViewBox}
-        aria-label="우리 아지트와 순환 레일, 왼쪽 콜로세움, 오른쪽 축구장과 자동차 위치"
+        aria-label="우리 아지트와 개인 차고, 순환 레일, 왼쪽 콜로세움, 오른쪽 축구장과 자동차 위치"
       >
         <g transform={`translate(${soccerMapCenter.x},${soccerMapCenter.y})`}>
           <rect
@@ -366,6 +378,40 @@ function MiniMap({ state, onSelect, large = false, peers = [], arena = null }) {
         <rect x="155" y="72" width="8" height="6" rx="2" fill="#aec36a" />
         <circle cx="145" cy="103" r="5" fill="#85adb5" />
         <circle cx="63" cy="111" r="5" fill="#d79782" />
+        {garages.map((garage) => {
+          const center = mapPoint(garageSlot(garage.slot));
+          const entry = mapPoint(
+            garagePoint(garage.slot, 0, FUEL.bridgeStart - FUEL.radius),
+          );
+          const mine = garage.ownerId === playerId;
+          return (
+            <g key={garage.ownerId}>
+              <title>{mine ? "내 차고" : `${garage.nickname}의 차고`}</title>
+              <path
+                d={`M${entry.x} ${entry.y}L${center.x} ${center.y}`}
+                stroke="#e0d8bf"
+                strokeWidth="7"
+              />
+              <ellipse
+                cx={center.x}
+                cy={center.y}
+                rx={FUEL.padRadius * 3.45}
+                ry={FUEL.padRadius * 2.5}
+                fill={mine ? "#c7d996" : "#d6c6a9"}
+                stroke={mine ? "#486646" : "#a9967a"}
+                strokeWidth={mine ? "1.8" : "0.8"}
+              />
+              <rect
+                x={center.x - 3.5}
+                y={center.y - 2.5}
+                width="7"
+                height="5"
+                rx="1"
+                fill={garage.color || "#8b9e82"}
+              />
+            </g>
+          );
+        })}
         {peers.map((p) => (
           <circle
             key={p.id}
@@ -408,6 +454,15 @@ function MiniMap({ state, onSelect, large = false, peers = [], arena = null }) {
           <MapPin size={16} />
         </button>
       )}
+      {large &&
+        onDriveHome &&
+        garages.some((garage) => garage.ownerId === playerId) && (
+          <button className="map-destination" onClick={onDriveHome}>
+            <span style={{ background: "#a4b775" }} />
+            <span>내 차고로 운전</span>
+            <MapPin size={16} />
+          </button>
+        )}
     </div>
   );
 }
@@ -541,6 +596,13 @@ export default function App() {
     Boolean(state.arenaSpectating) && !gameSpectatingBlocked;
   const soccerSpectating =
     Boolean(state.soccerSpectating) && !gameSpectatingBlocked;
+  const fuelBlocked = Boolean(
+    multiplayer.currentRace ||
+      multiplayer.currentArena ||
+      multiplayer.currentSoccer ||
+      arenaSpectating ||
+      soccerSpectating,
+  );
   const gallery = useGallery(
     section === "work" || (section === "photo" && photoView?.archived),
     multiplayer.galleryVersion,
@@ -573,6 +635,16 @@ export default function App() {
           notify("길이 막혀 있어요. 조금 옆을 찍어 주세요."),
         onInteraction: (event) => multiplayer.emitInteraction(event),
         onSpray: () => multiplayer.sprayNow(),
+        onFuelAction: async (action, payload = {}) => {
+          const result = await multiplayer.gameAction(action, payload, {
+            quiet: true,
+          });
+          if (!result?.ok && action !== "fuel:cancel") {
+            world.current?.setFuelStealHeld(false);
+            notify(result?.message || "기름통에 더 가까이 다가가 주세요.");
+          }
+          return result;
+        },
       });
       world.current.setTimeControl(timeControl);
       setReady(true);
@@ -600,6 +672,9 @@ export default function App() {
   useEffect(() => {
     world.current?.setPeers(multiplayer.peers);
   }, [multiplayer.peers]);
+  useEffect(() => {
+    if (ready) world.current?.setFuel(multiplayer.fuel);
+  }, [ready, multiplayer.fuel]);
   useEffect(() => {
     world.current?.setIdentity(multiplayer.player);
   }, [multiplayer.player]);
@@ -1046,6 +1121,22 @@ export default function App() {
           </div>
         </div>
       </header>
+      <FuelHud
+        fuel={multiplayer.fuel}
+        playerId={multiplayer.player?.id}
+        bodyId={multiplayer.profile?.equipped?.body}
+        connected={multiplayer.connected}
+        tank={state.fuel?.tank}
+        nearTheft={fuelBlocked ? null : state.fuel?.nearTheft}
+        onAction={(action, payload) =>
+          world.current?.setFuelStealHeld(
+            action === "fuel:steal",
+            payload?.targetId,
+          )
+        }
+        onJoin={() => open("join")}
+        onDriveHome={fuelBlocked ? null : () => world.current?.driveToGarage()}
+      />
       <ArenaHud
         arena={multiplayer.currentArena}
         playerId={multiplayer.player?.id}
@@ -1337,6 +1428,8 @@ export default function App() {
             state={state}
             peers={multiplayer.peers}
             arena={arenaDisplay}
+            garages={multiplayer.fuel?.garages}
+            playerId={multiplayer.player?.id}
           />
         </button>
         <div className="map-caption">
@@ -1445,6 +1538,13 @@ export default function App() {
           />
         </div>
         <div>
+          <TouchButton
+            name="연료 부스트"
+            icon={Zap}
+            field="boost"
+            value={1}
+            world={world}
+          />
           <TouchButton
             name="후진"
             icon={ArrowDown}
@@ -1863,6 +1963,17 @@ export default function App() {
               state={state}
               peers={multiplayer.peers}
               arena={arenaDisplay}
+              garages={multiplayer.fuel?.garages}
+              playerId={multiplayer.player?.id}
+              onDriveHome={
+                fuelBlocked
+                  ? null
+                  : () => {
+                      close();
+                      world.current?.setPaused(false);
+                      world.current?.driveToGarage();
+                    }
+              }
               onSelect={visit}
               large
             />
@@ -1894,7 +2005,7 @@ export default function App() {
                 <kbd>방향키</kbd>
               </p>
               <p>
-                <span>조금 더 빠르게</span>
+                <span>연료를 사용해 부스트</span>
                 <kbd>SHIFT</kbd>
               </p>
               <p>
@@ -1902,7 +2013,7 @@ export default function App() {
                 <kbd>SPACE</kbd>
               </p>
               <p>
-                <span>가까운 장소 둘러보기</span>
+                <span>장소 둘러보기 · 기름통 옆에서 3초 유지하면 훔치기</span>
                 <kbd>E</kbd>
               </p>
               <p>
@@ -1928,12 +2039,19 @@ export default function App() {
                 맵 아래 레일을 한 바퀴 돌면 <strong>{LAP_REWARD}코인</strong>을
                 받아요.
                 <br />
-                차고지에서 100코인으로 상자를 열어요. 같이 놀자에서는 각
+                차량 정비소에서 100코인으로 상자를 열어요. 같이 놀자에서는 각
                 20코인을 걸고 2–10명이 콜로세움에서 만나요. 마지막까지 경기장에
                 남은 한 대가 모인 코인을 모두 받아요. 1대1 레이싱 탭에서는 외곽
                 코스 한 바퀴 대결도 즐길 수 있어요.
               </p>
             </div>
+            <p className="modal-intro">
+              온라인 입장하면 내 차고가 생겨요. 공통 서버 시계의 매 분 정각마다
+              기름이 20씩 쌓이고, 내 주유 구역에 머무르면 연료가 채워져요. 문
+              버튼을 차로 밟으면 30초 동안 닫힙니다. 열린 상대 차고의 기름통
+              옆에서 E를 3초간 누른 뒤 내 차고로 운반해 보세요. 부딪히면
+              운반하던 기름통이 떨어져요.
+            </p>
             <p className="modal-intro">
               휴대폰에서는 아래쪽 방향 버튼으로 운전할 수 있어요. 서로 기분 좋은
               이야기를 나눠주세요.

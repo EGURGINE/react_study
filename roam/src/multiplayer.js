@@ -23,6 +23,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     [arenaResult, setArenaResult] = useState(null),
     [arenaHonors, setArenaHonors] = useState(null),
     [soccer, setSoccer] = useState(null),
+    [fuel, setFuel] = useState(null),
     [soccerResult, setSoccerResult] = useState(null),
     [latestLap, setLatestLap] = useState(null),
     [lapProgress, setLapProgress] = useState({ active: false, progress: 0 }),
@@ -65,6 +66,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         setArenas([]);
         setArenaResult(null);
         setSoccer(null);
+        setFuel(null);
         setSoccerResult(null);
         clearGames();
         const base = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
@@ -128,21 +130,24 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             position.current = {
               ...position.current,
               x: data.player.x,
+              y: data.player.y || 0,
               z: data.player.z,
               heading: data.player.heading,
+              manualBoost: false,
             };
             setPlayer(data.player);
             setProfile(data.profile || null);
             setRaces(data.races || []);
             setArenas(data.arenas || []);
             setSoccer(data.soccer || null);
+            setFuel(data.fuel || null);
             if (data.arenaHonors) setArenaHonors(data.arenaHonors);
             if (typeof data.resumeToken === "string") {
               try {
                 localStorage.setItem("roam-player-token-v1", data.resumeToken);
               } catch {
                 notify(
-                  "브라우저 저장이 꺼져 있어요. 이 창을 닫으면 차고지를 다시 불러오지 못할 수 있어요.",
+                  "브라우저 저장이 꺼져 있어요. 이 창을 닫으면 보유 차량과 코인을 다시 불러오지 못할 수 있어요.",
                 );
               }
             }
@@ -199,6 +204,12 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
           if (data.type === "arena:state") setArenas(data.arenas || []);
           if (data.type === "arena:honors") setArenaHonors(data.honors);
           if (data.type === "soccer:state") setSoccer(data.soccer || null);
+          if (data.type === "fuel:state") setFuel(data.fuel || null);
+          if (
+            data.type === "fuel:event" &&
+            data.playerId === identity.current?.id
+          )
+            notify(data.message);
           if (data.type === "soccer:finish" && data.result) {
             setSoccerResult({ ...data.result, receivedAt: Date.now() });
           }
@@ -252,8 +263,10 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             position.current = {
               ...position.current,
               x: data.player.x,
+              y: data.player.y || 0,
               z: data.player.z,
               heading: data.player.heading,
+              manualBoost: false,
             };
             travelPending.current = false;
             setTraveling(false);
@@ -281,7 +294,12 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
                 pendingSend.current = null;
               }
               if (operation === "move" && data.player) {
-                position.current = { ...position.current, ...data.player };
+                position.current = {
+                  ...position.current,
+                  ...data.player,
+                  y: data.player.y || 0,
+                  manualBoost: false,
+                };
                 setCorrection({ ...data.player, at: Date.now() });
               }
               notify(data.message);
@@ -311,6 +329,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
           setRaces([]);
           setArenas([]);
           setSoccer(null);
+          setFuel(null);
           setPhotos({});
           setLapProgress({ active: false, progress: 0 });
           travelPending.current = false;
@@ -364,6 +383,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     setConnected(false);
     setArenas([]);
     setSoccer(null);
+    setFuel(null);
   }, []);
   const teleport = useCallback((destination) => {
     if (socket.current?.readyState === WebSocket.OPEN && identity.current) {
@@ -429,7 +449,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             ),
           );
           const message =
-            "서버 응답이 늦어지고 있어요. 차고지 잔액을 확인해 주세요.";
+            "서버 응답이 늦어지고 있어요. 보유 코인을 확인해 주세요.";
           if (!quiet) notify(message);
           resolve({ ok: false, message });
         }, 15000);
@@ -524,6 +544,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
       if (
         ws?.readyState === WebSocket.OPEN &&
         identity.current &&
+        !document.hidden &&
         !travelPending.current &&
         !pendingPhoto.current &&
         ws.bufferedAmount < 16384
@@ -536,6 +557,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             y: p.y || 0,
             z: p.z,
             heading: p.heading,
+            manualBoost: Boolean(p.manualBoost),
           }),
         );
       }
@@ -599,6 +621,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     arenaResult,
     arenaHonors,
     soccer,
+    fuel,
     currentSoccer,
     soccerResult,
     latestLap,

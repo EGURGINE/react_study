@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
+import { DatabaseSync } from "node:sqlite";
 import { createGameServer } from "./index.js";
 import { createGalleryStore } from "./gallery.js";
 import { createGameEngine } from "./game.js";
@@ -19,6 +20,7 @@ import { ITEMS, RARITIES, trackPoint } from "../src/gameConfig.js";
 import { getVehicleProfile } from "../src/vehicleDynamics.js";
 import { SOCCER, soccerSpawn } from "../src/soccerConfig.js";
 import { SOCCER_CAR_CONTACT } from "../src/carCollisions.js";
+import { FUEL, garagePoint } from "../src/fuelConfig.js";
 
 const ORIGIN = "http://localhost:5173";
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9]);
@@ -120,12 +122,12 @@ async function approach(client, current, target) {
   );
   let position = current;
   for (let step = 1; step <= steps; step += 1) {
-    // Stay below the normal server movement budget; tests never bypass it to
-    // place a client near an interaction or the expanded island boundary.
+    // These fast setup movements use the account's real starting fuel. The
+    // server still checks the same bounds, budgets and fuel as regular driving.
     await new Promise((resolve) => setTimeout(resolve, 180));
     const x = current.x + ((target.x - current.x) * step) / steps;
     const z = current.z + ((target.z - current.z) * step) / steps;
-    client.send({ type: "move", x, z, heading: 0 });
+    client.send({ type: "move", x, z, heading: 0, manualBoost: true });
     const state = await client.wait(
       (message) =>
         message.type === "state" &&
@@ -144,6 +146,274 @@ async function travel(client, destination, target) {
   const reply = await client.wait((message) => message.type === "teleport");
   return approach(client, reply.player, target);
 }
+
+test("online fuel uses authenticated movement, charges delayed boosts, and survives reconnect without accepting forged quantities", async (t) => {
+  const room = await fixture(t);
+  const driver = await room.connect();
+  driver.send({
+    type: "game",
+    action: "fuel:steal",
+    targetId: "fake",
+    requestId: "unjoined-fuel",
+  });
+  assert.equal(
+    (await driver.wait((m) => m.type === "error")).code,
+    "not_joined",
+  );
+  const welcome = await driver.join("연료 실주행");
+  assert.equal(
+    welcome.fuel.players.find((p) => p.id === welcome.player.id).tank,
+    100,
+  );
+  assert.equal(
+    welcome.fuel.garages.find((g) => g.ownerId === welcome.player.id).stored,
+    0,
+  );
+  for (let step = 1; step <= 5; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    driver.send({
+      type: "move",
+      x: welcome.player.x + step * 3,
+      z: welcome.player.z,
+      heading: 0,
+      manualBoost: true,
+      tank: 999999,
+    });
+  }
+  const consumed = await driver.wait(
+    (m) =>
+      m.type === "fuel:state" &&
+      m.fuel.players.some((p) => p.id === welcome.player.id && p.tank < 88),
+  );
+  const tank = consumed.fuel.players.find(
+    (p) => p.id === welcome.player.id,
+  ).tank;
+  assert.ok(tank >= 80 && tank < 88);
+  driver.send({
+    type: "game",
+    action: "fuel:steal",
+    requestId: "fake-units",
+    targetId: welcome.player.id,
+    amount: 99999,
+  });
+  assert.equal(
+    (await driver.wait((m) => m.requestId === "fake-units")).code,
+    "invalid_game",
+  );
+  driver.send({
+    type: "move",
+    x: welcome.player.x + 15,
+    z: welcome.player.z,
+    heading: 0,
+    manualBoost: "true",
+  });
+  assert.equal(
+    (await driver.wait((m) => m.type === "error")).code,
+    "invalid_move",
+  );
+  await driver.close();
+  const returning = await room.connect();
+  returning.send({
+    type: "join",
+    nickname: "연료 다시 입장",
+    token: welcome.resumeToken,
+  });
+  const back = await returning.wait((m) => m.type === "welcome");
+  assert.equal(
+    back.fuel.players.find((p) => p.id === back.player.id).tank,
+    tank,
+  );
+});
+
+test("sustained high speed without manual fuel or with an empty tank is rejected while verified pads still work", async (t) => {
+  const room = await fixture(t, {
+    preparePlayers(directory) {
+      const seed = createGameEngine({ directory });
+      const token = seed.attach({
+        id: "empty-seed",
+        nickname: "빈 탱크",
+        x: 0,
+        z: 0,
+        heading: 0,
+      }).resumeToken;
+      seed.shutdown();
+      const db = new DatabaseSync(join(directory, "game.sqlite"));
+      db.exec("UPDATE fuel_accounts SET tank = 0");
+      db.close();
+      return token;
+    },
+  });
+  for (const empty of [false, true]) {
+    const driver = await room.connect();
+    driver.send({
+      type: "join",
+      nickname: empty ? "빈 탱크 운전" : "일반 운전",
+      ...(empty ? { token: room.preparedPlayers } : {}),
+    });
+    const welcome = await driver.wait((m) => m.type === "welcome");
+    for (let step = 1; step <= 12; step += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      driver.send({
+        type: "move",
+        x: welcome.player.x + step * 1.5,
+        z: welcome.player.z,
+        heading: 0,
+        manualBoost: empty,
+      });
+    }
+    assert.equal(
+      (await driver.wait((m) => m.type === "error")).code,
+      "invalid_move",
+    );
+    await driver.close();
+  }
+  const empty = await room.connect();
+  empty.send({
+    type: "join",
+    nickname: "빈 탱크 패드",
+    token: room.preparedPlayers,
+  });
+  await empty.wait((m) => m.type === "welcome");
+  empty.send({ type: "teleport", destination: "play" });
+  const base = (await empty.wait((m) => m.type === "teleport")).player;
+  // The slow approach must work without Shift and without a single fuel unit.
+  for (let step = 1; step <= 16; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    empty.send({
+      type: "move",
+      x: base.x + ((16 - base.x) * step) / 16,
+      z: base.z * (1 - step / 16),
+      heading: 0,
+      manualBoost: false,
+    });
+  }
+  await empty.wait(
+    (m) =>
+      m.type === "state" &&
+      m.players.some(
+        (p) => p.nickname === "빈 탱크 패드" && p.x === 16 && p.z === 0,
+      ),
+  );
+  empty.send({ type: "interaction", objectId: "boost-1" });
+  await empty.wait((m) => m.type === "interaction");
+  for (let step = 1; step <= 12; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    empty.send({
+      type: "move",
+      x: 16 - step * 1.04,
+      z: 0,
+      heading: 0,
+      manualBoost: false,
+    });
+  }
+  await empty.wait(
+    (m) =>
+      m.type === "state" &&
+      m.players.some(
+        (p) => p.nickname === "빈 탱크 패드" && p.x === 16 - 12 * 1.04,
+      ),
+  );
+  const latest = await empty.wait(
+    (m) => m.type === "fuel:state" && m.fuel.players.some((p) => p.tank === 0),
+  );
+  assert.equal(latest.fuel.players[0].tank, 0);
+});
+
+test("active garage doors block visitors and owner disconnect safely restores stranded visitors", async (t) => {
+  const room = await fixture(t);
+  const owner = await room.connect();
+  const visitor = await room.connect();
+  const own = await owner.join("차고 주인");
+  const other = await visitor.join("차고 방문");
+  const garage = own.fuel.garages.find((g) => g.ownerId === own.player.id);
+  const bridge = garagePoint(garage.slot, 0, FUEL.bridgeStart - FUEL.radius);
+  const pump = garagePoint(garage.slot, FUEL.pumpAcross, FUEL.pumpOutward);
+  let pose = await approach(visitor, other.player, bridge);
+  await approach(visitor, pose, pump);
+  const pad = garagePoint(garage.slot, FUEL.closeAcross, FUEL.closeOutward);
+  pose = await approach(owner, own.player, bridge);
+  // Enter along the open bridge first, then cross the owner's closing pad.
+  pose = await approach(
+    owner,
+    pose,
+    garagePoint(garage.slot, 0, FUEL.closeOutward),
+  );
+  await approach(owner, pose, pad);
+  await visitor.wait(
+    (m) =>
+      m.type === "fuel:state" &&
+      m.fuel.garages.some(
+        (g) => g.ownerId === own.player.id && g.closedUntil > m.fuel.serverNow,
+      ),
+  );
+  visitor.send({ type: "move", ...bridge, heading: 0, manualBoost: false });
+  const blocked = await visitor.wait((m) => m.type === "error");
+  assert.equal(blocked.code, "invalid_move");
+  assert.match(blocked.message, /차고 문/);
+  assert.equal(blocked.player.x, pump.x);
+  await owner.close();
+  const returned = await visitor.wait((m) => m.type === "teleport");
+  assert.ok(
+    Math.abs(
+      Math.hypot(returned.player.x, returned.player.z) - FUEL.bridgeStart,
+    ) < 1e-8,
+  );
+  const fresh = await visitor.wait(
+    (m) =>
+      m.type === "fuel:state" &&
+      !m.fuel.garages.some((g) => g.ownerId === own.player.id),
+  );
+  assert.equal(fresh.fuel.garages.length, 1);
+});
+
+test("garage walls reject owner and airborne crossings even when both endpoints are valid ground", async (t) => {
+  const room = await fixture(t);
+  const owner = await room.connect();
+  const own = await owner.join("차고 벽 검증");
+  const garage = own.fuel.garages.find((g) => g.ownerId === own.player.id);
+  const bridge = garagePoint(garage.slot, 0, FUEL.bridgeStart - FUEL.radius);
+  let pose = await approach(owner, own.player, bridge);
+  const center = garagePoint(garage.slot);
+  pose = await approach(owner, pose, center);
+  const rim = garagePoint(
+    garage.slot,
+    0,
+    FUEL.padRadius - FUEL.carRadius - 0.05,
+  );
+  for (const y of [0, 8]) {
+    owner.send({ type: "move", ...rim, y, heading: 0, manualBoost: true });
+    const blocked = await owner.wait((m) => m.type === "error");
+    assert.equal(blocked.code, "invalid_move");
+    assert.match(blocked.message, /차고 벽/);
+    assert.equal(blocked.player.x, center.x);
+    assert.equal(blocked.player.z, center.z);
+  }
+  pose = await approach(owner, pose, bridge);
+  const beforeEntry = FUEL.bridgeStart - FUEL.radius - 1.4;
+  pose = await approach(owner, pose, garagePoint(garage.slot, 0, beforeEntry));
+  pose = await approach(
+    owner,
+    pose,
+    garagePoint(garage.slot, FUEL.bridgeHalfWidth + 0.95, beforeEntry),
+  );
+  pose = await approach(
+    owner,
+    pose,
+    garagePoint(
+      garage.slot,
+      FUEL.bridgeHalfWidth + 0.95,
+      FUEL.bridgeStart - FUEL.radius,
+    ),
+  );
+  // Both positions are on the main island, but the segment crosses the end
+  // of the bridge's side wall. Sampling only driveable floor cannot catch it.
+  owner.send({ type: "move", ...bridge, y: 8, heading: 0, manualBoost: true });
+  const blocked = await owner.wait((m) => m.type === "error");
+  assert.equal(blocked.code, "invalid_move");
+  assert.match(blocked.message, /차고 벽/);
+  assert.equal(blocked.player.x, pose.x);
+  assert.equal(blocked.player.z, pose.z);
+});
 
 test("online attendance grants one private reward, rejects forged claims, and survives nickname reconnect", async (t) => {
   const room = await fixture(t);
@@ -582,7 +852,7 @@ test("twenty-two meter per second combined vehicle motion stays within authorita
       heading: -angle,
       y: Math.sin((step / 20) * Math.PI) * 3.2,
     };
-    client.send({ type: "move", ...destination });
+    client.send({ type: "move", ...destination, manualBoost: true });
   }
   await client.wait(
     (message) =>

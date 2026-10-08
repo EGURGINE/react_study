@@ -10,7 +10,7 @@
     "server": "node server/index.js",
     "host:pc": "node scripts/host-pc.mjs",
     "start": "node server/index.js",
-    "test": "node --test server/index.test.js server/game.test.js server/arena.test.js server/attendance.test.js src/navigation.test.js src/railNavigation.test.js src/railWorld.test.js src/attractions.test.js src/gameConfig.test.js src/dayCycle.test.js src/cosmeticsCatalog.test.js src/nightLights.test.js src/duelObstacles.test.js src/duelWorld.test.js src/arenaConfig.test.js src/arenaWorld.test.js src/arenaCelebration.test.js src/arenaHonors.test.js src/carCollisions.test.js src/vehicleDynamics.test.js src/chatLayout.test.js server/soccer.test.js src/soccerWorld.test.js src/soccerDriving.test.js",
+    "test": "node --test server/index.test.js server/game.test.js server/arena.test.js server/attendance.test.js src/navigation.test.js src/railNavigation.test.js src/railWorld.test.js src/attractions.test.js src/gameConfig.test.js src/dayCycle.test.js src/cosmeticsCatalog.test.js src/nightLights.test.js src/duelObstacles.test.js src/duelWorld.test.js src/arenaConfig.test.js src/arenaWorld.test.js src/arenaCelebration.test.js src/arenaHonors.test.js src/carCollisions.test.js src/vehicleDynamics.test.js src/chatLayout.test.js server/soccer.test.js src/soccerWorld.test.js src/soccerDriving.test.js server/fuel.test.js src/fuelWorld.test.js src/garageWalls.test.js",
     "dev:all": "node scripts/local.mjs"
   },
   "dependencies": {

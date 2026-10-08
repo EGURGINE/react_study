@@ -212,7 +212,23 @@ export function createGameServer({
     teleport: (playerId, pose) => {
       const session = players.get(playerId);
       if (!session) return;
+      const arena = game.arenaFor(playerId);
+      const inArena =
+        arena?.status !== "waiting" &&
+        arena &&
+        Math.hypot(pose.x - ARENA.cx, pose.z - ARENA.cz) <= arena.radius + 12;
+      const inSoccer =
+        game.soccerFor(playerId) && isSoccerDriveable(pose.x, pose.z);
+      // A saved match return point may belong to a garage whose owner left.
+      if (
+        !isDriveable(pose.x, pose.z) &&
+        !game.fuelDriveable(pose.x, pose.z) &&
+        !inArena &&
+        !inSoccer
+      )
+        pose = { x: 0, y: 0, z: 0, heading: 0 };
       Object.assign(session.player, pose);
+      game.repositionFuel(playerId, pose);
       session.movementAt = performance.now();
       session.forcedTeleportAt = session.movementAt;
       resetContact(session, session.movementAt);
@@ -505,6 +521,7 @@ export function createGameServer({
       arenas: game.snapshotArenas(),
       arenaHonors: game.snapshotArenaHonors(),
       soccer: game.snapshotSoccer(),
+      fuel: game.snapshotFuel(),
       sprays: game.recentSprays(),
     });
     broadcastState();
@@ -580,6 +597,8 @@ export function createGameServer({
       );
       if (!impact) continue;
       impactCooldowns.set(key, now);
+      session.physicsUntil = other.physicsUntil = now + 2000;
+      game.dropFuel([session.player.id, other.player.id]);
       const response = (value) =>
         activeArena
           ? {
@@ -621,18 +640,33 @@ export function createGameServer({
     const arena = membership?.status === "running" ? membership : null;
     const soccer = game.soccerFor(session.player.id);
     const activeSoccer = soccer?.status === "playing" ? soccer : null;
+    const vehicle = getVehicleProfile(session.player.cosmetics.body);
+    const fueledBoost =
+      data.manualBoost === true &&
+      distance > 0.025 &&
+      game.fuelTank(session.player.id) > 0;
+    const physicsAllowance = now < session.physicsUntil;
+    const ordinaryLimit =
+      physicsAllowance || fueledBoost
+        ? MAX_MOVEMENT_SPEED
+        : vehicle.topSpeed + 1.5;
     const maxSpeed = arena
-      ? ARENA.maxSpeed
+      ? Math.min(
+          ARENA.maxSpeed,
+          physicsAllowance ? ARENA.maxSpeed : ordinaryLimit,
+        )
       : activeSoccer
-        ? SOCCER.maxCarSpeed
-        : MAX_MOVEMENT_SPEED;
+        ? Math.min(SOCCER.maxCarSpeed, ordinaryLimit)
+        : ordinaryLimit;
     if (
       !finite ||
+      (data.manualBoost !== undefined &&
+        typeof data.manualBoost !== "boolean") ||
       !(arena
         ? Math.hypot(x - ARENA.cx, z - ARENA.cz) <= arena.radius + 12
         : activeSoccer
           ? isSoccerDriveable(x, z)
-          : isDriveable(x, z)) ||
+          : isDriveable(x, z) || game.fuelDriveable(x, z)) ||
       y < 0 ||
       y > DUEL_MOVEMENT_LIMITS.maxHeight
     ) {
@@ -676,10 +710,32 @@ export function createGameServer({
         return;
       }
     }
+    if (!arena && !activeSoccer) {
+      const blocked = game.fuelDoorContact(
+        session.player,
+        { x, z },
+        session.player.id,
+      );
+      if (blocked && Math.hypot(blocked.x - x, blocked.z - z) > 0.03) {
+        error(
+          session.socket,
+          "invalid_move",
+          blocked.kind === "wall"
+            ? "차고 벽 안쪽에서 움직여 주세요. 열린 입구로 나갈 수 있어요."
+            : "차고 문이 닫혀 있어요. 잠시 뒤 다시 열려요.",
+          "move",
+        );
+        return;
+      }
+    }
     const steps = Math.ceil(distance / 0.5);
     for (let step = 1; !arena && !activeSoccer && step < steps; step += 1) {
       if (
         !isDriveable(
+          session.player.x + ((x - session.player.x) * step) / steps,
+          session.player.z + ((z - session.player.z) * step) / steps,
+        ) &&
+        !game.fuelDriveable(
           session.player.x + ((x - session.player.x) * step) / steps,
           session.player.z + ((z - session.player.z) * step) / steps,
         )
@@ -711,6 +767,12 @@ export function createGameServer({
       z,
       heading: Math.atan2(Math.sin(heading), Math.cos(heading)),
     });
+    game.observeFuel(
+      session.player.id,
+      session.player,
+      data.manualBoost === true,
+      elapsed,
+    );
     checkCarContacts(session, previousContactPose, now);
     try {
       game.onMove(session.player.id, session.player);
@@ -805,11 +867,13 @@ export function createGameServer({
       return;
     }
     session.lastTeleportAt = now;
+    game.returnFuel(session.player.id);
     game.resetLap(session.player.id);
     session.movementAt = now;
     session.movementBudget = MAX_MOVEMENT_BUDGET;
     session.movementCatchupUntil = 0;
     Object.assign(session.player, DESTINATIONS[data.destination], { y: 0 });
+    game.repositionFuel(session.player.id, session.player);
     resetContact(session, now);
     send(session.socket, { type: "teleport", player: { ...session.player } });
     broadcastState();
@@ -835,6 +899,7 @@ export function createGameServer({
         : game.interact(session.player.id, data.objectId);
       if (!result.ok)
         error(session.socket, result.code, result.message, "interaction");
+      else session.physicsUntil = now + 2500;
       return;
     }
     const object = INTERACTIONS[data.objectId];
@@ -873,6 +938,7 @@ export function createGameServer({
       }
       session.lastInteractionAt = now;
     }
+    if (object.kind !== "pop") session.physicsUntil = now + 2500;
     broadcast({
       type: "interaction",
       objectId: data.objectId,
@@ -976,6 +1042,7 @@ export function createGameServer({
       photoPending: false,
       photoVersion: 0,
       lastInteractionAt: -Infinity,
+      physicsUntil: -Infinity,
       joinTimeout: setTimeout(() => {
         error(
           socket,

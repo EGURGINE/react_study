@@ -6,6 +6,20 @@ import { createDuelWorld } from "./duelWorld.js";
 import { createArenaWorld } from "./arenaWorld.js";
 import { createArenaCelebration } from "./arenaCelebration.js";
 import {
+  createFuelWorld,
+  createFuelPrediction,
+  fuelProximity,
+  blocksGarageApproach,
+} from "./fuelWorld.js";
+import {
+  FUEL,
+  garagePoint,
+  garageDoorContact,
+  garageWallContact,
+  isGarageDriveable,
+  getFuelEconomy,
+} from "./fuelConfig.js";
+import {
   createSoccerWorld,
   soccerViewSize,
   soccerPoseTransfer,
@@ -61,7 +75,7 @@ export const ZONES = [
   },
   {
     id: "about",
-    title: "차고지",
+    title: "차량 정비소",
     subtitle: "내 차를 꾸미는 공간",
     x: -8,
     z: -1,
@@ -346,7 +360,7 @@ export function createWorld(host, callbacks) {
       cylinder(0, 0.8 * s, 1.7 * s, "#647d55", t, 0, 2.25 * s, 0, 6);
       cylinder(0, 0.57 * s, 1.5 * s, "#809465", t, 0, 2.87 * s, 0, 6);
     }
-    colliders.push({ x, z, r: 0.5 * s });
+    colliders.push({ x, z, r: 0.5 * s, model: t });
   }
   [
     [-11, -6, 1.1],
@@ -738,6 +752,107 @@ export function createWorld(host, callbacks) {
     reducedMotion: reduced,
   });
   const soccerWorld = createSoccerWorld(scene, { reducedMotion: reduced });
+  const fuelWorld = createFuelWorld(scene);
+  const fuelPrediction = createFuelPrediction();
+  const fuelCars = new Map();
+  let fuel = null,
+    fuelClockOffset = 0,
+    manualBoost = false;
+  let activeColliders = colliders;
+  let stealHeld = false,
+    stealTarget = null,
+    stealRequest = 0,
+    stealBeganAt = 0,
+    sawServerStealing = false;
+  const fuelNow = () => Date.now() - fuelClockOffset;
+  const fuelPlayer = () =>
+    fuel?.players?.find((player) => player.id === localId);
+  const occupiedGarages = () => (localId ? fuel?.garages || [] : []);
+  const worldDriveable = (x, z) =>
+    isDriveable(x, z) ||
+    occupiedGarages().some((garage) => isGarageDriveable(x, z, garage.slot));
+  const fuelAvailable = () => Boolean(localId && fuelPlayer());
+  function refreshFuel() {
+    fuelWorld.setFuel(localId ? fuel : null, localId);
+    activeColliders = colliders.filter((collider) => {
+      const blocked = blocksGarageApproach(collider, occupiedGarages());
+      if (collider.model) collider.model.visible = !blocked;
+      return !blocked;
+    });
+  }
+  function fuelContext() {
+    return fuelProximity(
+      localId ? fuel : null,
+      localId,
+      car.position,
+      fuelNow(),
+    );
+  }
+  function fuelLocked() {
+    return Boolean(
+      paused ||
+        document.hidden ||
+        arenaPeek ||
+        soccerPeek ||
+        arenaMember() ||
+        soccerMember() ||
+        (race && (race.hostId === localId || race.guestId === localId)),
+    );
+  }
+  function setFuelStealHeld(held, targetId) {
+    if (!held) {
+      const hadRequest = stealHeld || stealTarget;
+      stealHeld = false;
+      stealTarget = null;
+      stealBeganAt = 0;
+      sawServerStealing = false;
+      stealRequest++;
+      return hadRequest
+        ? Promise.resolve(callbacks.onFuelAction?.("fuel:cancel", {})).catch(
+            () => ({ ok: false }),
+          )
+        : Promise.resolve({ ok: true });
+    }
+    if (stealHeld) return Promise.resolve({ ok: true });
+    const nearby = fuelContext().nearTheft;
+    if (
+      !fuelAvailable() ||
+      fuelLocked() ||
+      fuelPlayer()?.carrying ||
+      !nearby ||
+      (targetId && nearby.ownerId !== targetId) ||
+      nearby.closed ||
+      nearby.stored <= 0
+    )
+      return Promise.resolve({
+        ok: false,
+        message: "열린 차고의 연료통 가까이에서 길게 눌러 주세요.",
+      });
+    stealHeld = true;
+    stealTarget = nearby.ownerId;
+    stealBeganAt = fuelNow();
+    sawServerStealing = false;
+    const request = ++stealRequest;
+    return Promise.resolve(
+      callbacks.onFuelAction?.("fuel:steal", { targetId: stealTarget }),
+    )
+      .then((result) => {
+        if (!result?.ok && request === stealRequest) {
+          stealHeld = false;
+          stealTarget = null;
+          stealBeganAt = 0;
+        }
+        return result || { ok: false };
+      })
+      .catch(() => {
+        if (request === stealRequest) {
+          stealHeld = false;
+          stealTarget = null;
+          stealBeganAt = 0;
+        }
+        return { ok: false, message: "연결을 확인하고 다시 시도해 주세요." };
+      });
+  }
   const teamRingGeometry = new THREE.RingGeometry(1.04, 1.27, 32);
   teamRingGeometry.rotateX(-Math.PI / 2);
   const teamRings = Object.fromEntries(
@@ -944,7 +1059,7 @@ export function createWorld(host, callbacks) {
         ? isSoccerDriveable(hit.x, hit.z, -SOCCER.carRadius)
         : insideArena()
           ? Math.hypot(hit.x - ARENA.cx, hit.z - ARENA.cz) < arena.radius - 0.8
-          : isDriveable(hit.x, hit.z)) &&
+          : worldDriveable(hit.x, hit.z)) &&
         !(
           !insideArena() &&
           !insideSoccer() &&
@@ -966,7 +1081,7 @@ export function createWorld(host, callbacks) {
       ) < 0.2
     ) {
       cancelNavigation();
-      return;
+      return true;
     }
     const path =
       insideArena() || insideSoccer()
@@ -974,7 +1089,8 @@ export function createWorld(host, callbacks) {
         : findWorldPath(
             { x: car.position.x, z: car.position.z },
             destination,
-            colliders,
+            activeColliders,
+            { garages: occupiedGarages(), playerId: localId, now: fuelNow() },
           );
     if (!path.length) {
       cancelNavigation();
@@ -986,6 +1102,14 @@ export function createWorld(host, callbacks) {
     const last = path[path.length - 1];
     destinationMarker.position.set(last.x, 0.075, last.z);
     destinationMarker.visible = true;
+    return true;
+  }
+  function driveToGarage(ownerId = localId) {
+    if (!localId || fuelLocked()) return false;
+    const garage = occupiedGarages().find((entry) => entry.ownerId === ownerId);
+    if (!garage || (ownerId !== localId && garage.closedUntil > fuelNow()))
+      return false;
+    return driveTo(garagePoint(garage.slot, 0, -0.95)) === true;
   }
   const interactionSurface = host.parentElement;
   function onContextMenu(event) {
@@ -998,7 +1122,7 @@ export function createWorld(host, callbacks) {
     pointToDrive(event);
   }
   interactionSurface.addEventListener("contextmenu", onContextMenu);
-  let mobile = { throttle: 0, steer: 0, brake: false };
+  let mobile = { throttle: 0, steer: 0, brake: false, boost: false };
   let audioContext = null,
     osc = null,
     gain = null,
@@ -1080,7 +1204,8 @@ export function createWorld(host, callbacks) {
   function clearInput() {
     keys.clear();
     steeringInput = 0;
-    mobile = { throttle: 0, steer: 0, brake: false };
+    mobile = { throttle: 0, steer: 0, brake: false, boost: false };
+    if (stealHeld || stealTarget) void setFuelStealHeld(false);
   }
   function stopInput() {
     clearInput();
@@ -1124,11 +1249,16 @@ export function createWorld(host, callbacks) {
     if (e.repeat) return;
     if (e.code === "KeyR") reset();
     if (e.code === "KeyT") callbacks.onSpray?.();
+    if (e.code === "KeyE" && fuelContext().nearTheft) {
+      void setFuelStealHeld(true);
+      return;
+    }
     if ((e.code === "KeyE" || e.code === "Enter") && near)
       callbacks.onInteract(near);
   }
   function keyup(e) {
     keys.delete(e.code);
+    if (e.code === "KeyE") void setFuelStealHeld(false);
   }
   window.addEventListener("keydown", keydown);
   window.addEventListener("keyup", keyup);
@@ -1232,7 +1362,15 @@ export function createWorld(host, callbacks) {
       !(arenaPeek && !inArena) &&
       !(soccerPeek && !inSoccer) &&
       recovering === 0;
-    const vehicle = getVehicleProfile(equipped.body);
+    const baseVehicle = getVehicleProfile(equipped.body);
+    const carryingFuel = Boolean(fuelPlayer()?.carrying);
+    const vehicle = carryingFuel
+      ? {
+          ...baseVehicle,
+          topSpeed: baseVehicle.topSpeed * 0.8,
+          boostSpeed: baseVehicle.boostSpeed * 0.8,
+        }
+      : baseVehicle;
     const drivingVehicle =
       elapsed < raceBoostUntil && elapsed < boostUntil
         ? { ...vehicle, boostSpeed: 20 }
@@ -1250,9 +1388,15 @@ export function createWorld(host, callbacks) {
           (keys.has("ArrowRight") || keys.has("KeyD") ? 1 : 0) || mobile.steer
       : 0;
     const brake = keys.has("Space") || mobile.brake;
-    boost =
+    const manualRequested =
       active &&
-      (keys.has("ShiftLeft") || keys.has("ShiftRight") || elapsed < boostUntil);
+      fuelAvailable() &&
+      fuelPrediction.tank > 0 &&
+      (keys.has("ShiftLeft") || keys.has("ShiftRight") || mobile.boost);
+    const fuelStartX = car.position.x,
+      fuelStartZ = car.position.z;
+    boost = active && (manualRequested || elapsed < boostUntil);
+    manualBoost = false;
     // A stationary car can still be nudged while its driver has a panel open.
     const pushed =
       !document.hidden &&
@@ -1347,7 +1491,7 @@ export function createWorld(host, callbacks) {
       car.position.x += vx * velocityScale * dt;
       car.position.z += vz * velocityScale * dt;
       if (!inSoccer && !inArena)
-        for (const c of colliders) {
+        for (const c of activeColliders) {
           const dx = car.position.x - c.x,
             dz = car.position.z - c.z,
             d = Math.hypot(dx, dz);
@@ -1416,6 +1560,40 @@ export function createWorld(host, callbacks) {
         impactMotion.z = contact.impactZ;
         if (contact.hit) cancelNavigation();
       }
+      if (!inArena && !inSoccer) {
+        for (const garage of occupiedGarages()) {
+          const wall = garageWallContact(
+            previousPosition,
+            car.position,
+            garage,
+          );
+          if (wall) {
+            car.position.x = wall.x;
+            car.position.z = wall.z;
+            const into = vx * wall.nx + vz * wall.nz;
+            clearImpact();
+            if (into < 0) {
+              impactMotion.x = wall.nx * Math.min(1.2, -into * 0.12);
+              impactMotion.z = wall.nz * Math.min(1.2, -into * 0.12);
+            }
+            speed *= 0.15;
+            cancelNavigation();
+          }
+          const contact = garageDoorContact(
+            previousPosition,
+            car.position,
+            garage,
+            localId,
+            fuelNow(),
+          );
+          if (!contact) continue;
+          car.position.x = contact.x;
+          car.position.z = contact.z;
+          speed = 0;
+          clearImpact();
+          cancelNavigation();
+        }
+      }
       if (
         !inArena &&
         !inSoccer &&
@@ -1446,7 +1624,7 @@ export function createWorld(host, callbacks) {
       if (
         !inArena &&
         !inSoccer &&
-        !isDriveable(car.position.x, car.position.z)
+        !worldDriveable(car.position.x, car.position.z)
       ) {
         // Return to the last valid point, at most one frame away. A brief
         // visual dip signals recovery without sending an invalid/teleport pose.
@@ -1604,6 +1782,25 @@ export function createWorld(host, callbacks) {
         p.m.visible = true;
       }
     } else speed *= Math.exp(-8 * dt);
+    manualBoost = fuelPrediction.consume(
+      dt,
+      fuelPlayer()?.consumptionRate ||
+        getFuelEconomy(equipped.body).consumptionRate,
+      manualRequested,
+      Math.hypot(car.position.x - fuelStartX, car.position.z - fuelStartZ) >
+        dt * 0.12,
+    );
+    if (stealHeld) {
+      const nearby = fuelContext().nearTheft;
+      if (
+        fuelLocked() ||
+        !nearby ||
+        nearby.ownerId !== stealTarget ||
+        nearby.closed ||
+        fuelPlayer()?.carrying
+      )
+        void setFuelStealHeld(false);
+    }
     if (!document.hidden) {
       jumpVelocity -= 12 * dt;
       jump = Math.max(0, jump + jumpVelocity * dt);
@@ -1737,6 +1934,10 @@ export function createWorld(host, callbacks) {
       if (!teleported) cosmeticEffects.trail(p.model, remoteSpeed, dt, elapsed);
     }
     updateSoccerTeams();
+    fuelCars.clear();
+    if (localId) fuelCars.set(localId, car);
+    for (const peer of remoteCars.values()) fuelCars.set(peer.id, peer.model);
+    fuelWorld.update(fuelNow(), fuelCars, lighting.night);
     cosmeticEffects.update(dt, elapsed);
     nightLights.update(lighting.night, elapsed);
     postProcessing.render(dt);
@@ -1754,6 +1955,23 @@ export function createWorld(host, callbacks) {
       near,
       driveTime,
       boost: elapsed < boostUntil,
+      manualBoost,
+      fuel: {
+        tank: fuelPrediction.tank,
+        manualBoost,
+        ...fuelContext(),
+        stealHeld,
+        stealProgress: stealHeld
+          ? THREE.MathUtils.clamp(
+              (fuelNow() -
+                (fuelPlayer()?.stealing?.startedAt || stealBeganAt)) /
+                FUEL.stealMs,
+              0,
+              1,
+            )
+          : 0,
+        carried: fuelPlayer()?.carrying || null,
+      },
       navigating: waypoints.length > 0,
       track: {
         progress: projectTrack(car.position.x, car.position.z).progress,
@@ -1797,6 +2015,22 @@ export function createWorld(host, callbacks) {
   frameId = requestAnimationFrame(step);
   return {
     reset,
+    setFuel(value) {
+      fuel = value || null;
+      if (Number.isFinite(value?.serverAt))
+        fuelClockOffset = Date.now() - value.serverAt;
+      fuelPrediction.reconcile(fuelPlayer(), value?.serverAt);
+      if (!fuelAvailable() && (stealHeld || stealTarget))
+        void setFuelStealHeld(false);
+      if (stealHeld) {
+        if (fuelPlayer()?.stealing?.targetId === stealTarget)
+          sawServerStealing = true;
+        else if (sawServerStealing) void setFuelStealHeld(false);
+      }
+      refreshFuel();
+    },
+    setFuelStealHeld,
+    driveToGarage,
     setTimeControl(value) {
       lightingClock.set(value, (performance.now() - openedAt) / 1000);
     },
@@ -1991,6 +2225,7 @@ export function createWorld(host, callbacks) {
       attractions.play(event.objectId, elapsed, true);
     },
     setIdentity(player) {
+      if (stealHeld || stealTarget) void setFuelStealHeld(false);
       clearImpact();
       soccerTransfer = null;
       arenaFellAt = null;
@@ -2021,6 +2256,8 @@ export function createWorld(host, callbacks) {
       duelWorld.setRace(race, localId);
       refreshArena();
       refreshSoccer();
+      fuelPrediction.reconcile(fuelPlayer(), fuel?.serverAt);
+      refreshFuel();
     },
     setPosition(player) {
       clearImpact();
@@ -2105,6 +2342,7 @@ export function createWorld(host, callbacks) {
       arenaWorld.dispose?.();
       arenaCelebration.dispose();
       soccerWorld.dispose();
+      fuelWorld.dispose();
       nightLights.dispose();
       postProcessing.dispose();
       const textures = new Set(),

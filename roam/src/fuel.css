@@ -1,0 +1,116 @@
+.fuel-hud {
+  position: absolute;
+  top: 137px;
+  left: 46px;
+  width: 192px;
+  z-index: 7;
+  color: var(--ui-ink, #354b3e);
+  --fuel-green: var(--ui-accent, #74956b);
+}
+.fuel-pill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 57px;
+  padding: 10px 13px;
+  overflow: hidden;
+  border: 1px solid var(--ui-border, #dadfd0);
+  border-radius: 14px;
+  color: inherit;
+  background: var(--ui-panel, #f8f7ed);
+  box-shadow: 0 4px 18px #172a3b09;
+  text-align: left;
+}
+.fuel-pill-icon { display: flex; color: var(--fuel-green); }
+.fuel-pill-copy { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.fuel-pill-copy > span { font-size: 11px; }
+.fuel-pill-copy strong { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fuel-pill-copy small { font-size: 9px; color: var(--ui-muted, #819078); }
+.fuel-pill-unit { margin-left: 7px; font-size: 9px; }
+.fuel-pill > svg { flex-shrink: 0; transition: transform .2s; }
+.fuel-pill > svg.is-open { transform: rotate(180deg); }
+.fuel-pill-level { position: absolute; bottom: 0; left: 0; height: 3px; background: var(--fuel-green); transition: width .12s linear; }
+.fuel-low { --fuel-green: #c69366; }
+.fuel-near-hint { margin-top: 7px; overflow: hidden; border: 1px solid var(--ui-border, #dadfd0); border-radius: 10px; background: var(--ui-panel, #f8f7ed); }
+.fuel-near-hint > button { display: grid; gap: 5px; width: 100%; min-height: 43px; padding: 9px 12px; color: inherit; text-align: left; }
+.fuel-near-hint > button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.fuel-near-hint small { color: var(--ui-muted, #819078); font-size: 9px; }
+.fuel-near-hint kbd { padding: 0 3px; border: 1px solid var(--ui-border, #dadfd0); border-radius: 3px; font: inherit; color: var(--ui-ink, #354b3e); }
+.fuel-near-progress { height: 4px; background: color-mix(in srgb, var(--fuel-green) 12%, transparent); }
+.fuel-near-progress > i { display: block; height: 100%; background: var(--fuel-green); transition: width .1s linear; }
+.fuel-panel {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 12px);
+  width: 304px;
+  max-height: min(460px, calc(100svh - 176px));
+  padding: 16px;
+  border: 1px solid var(--ui-border, #dadfd0);
+  border-radius: 17px;
+  color: var(--ui-ink, #354b3e);
+  background: var(--ui-panel-strong, var(--ui-panel, #fbfaf2));
+  box-shadow: 0 14px 40px #122c381a;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 11px;
+  scrollbar-width: thin;
+}
+.fuel-panel-heading, .fuel-tank-heading, .fuel-garage-title, .fuel-theft-title { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.fuel-panel-heading { margin: -4px -5px 15px 0; font-weight: 600; }
+.fuel-panel-heading > span, .fuel-garage-title > span, .fuel-home-button, .fuel-boost-info, .fuel-production, .fuel-carrying { display: flex; align-items: center; gap: 7px; }
+.fuel-panel-heading > button { display: grid; place-items: center; min-width: 30px; min-height: 30px; border-radius: 8px; color: var(--ui-muted, #84907b); }
+.fuel-tank-heading strong { font-size: 22px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.fuel-tank-heading strong small { font-size: 10px; font-weight: 400; color: var(--ui-muted, #819078); }
+.fuel-gauge { margin-top: 8px; height: 7px; border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--ui-ink, #354b3e) 10%, transparent); }
+.fuel-gauge > i { display: block; height: 100%; border-radius: inherit; background: var(--fuel-green); transition: width .12s linear; }
+.fuel-boost-info { margin-top: 9px; font-size: 10px; color: var(--ui-muted, #819078); flex-wrap: wrap; }
+.fuel-boost-info strong { color: var(--ui-ink, #354b3e); font-weight: 500; }
+.fuel-boost-info > small { margin-left: auto; font-size: 9px; }
+.fuel-low-note, .fuel-error { margin: 10px 0 0; font-size: 10px; line-height: 1.65; color: #c68c64; }
+.fuel-garage-card { margin-top: 17px; padding: 13px; border-radius: 11px; background: color-mix(in srgb, var(--fuel-green) 8%, transparent); border: 1px solid var(--ui-border, #dadfd0); }
+.fuel-garage-title { font-size: 11px; }
+.fuel-garage-title > span:last-child { font-size: 9px; gap: 4px; }
+.fuel-door-closed { color: var(--fuel-green); }
+.fuel-door-open { color: var(--ui-muted, #819078); }
+.fuel-stock { margin: 14px 0; }
+.fuel-stock strong { font-size: 29px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.fuel-stock > span { font-size: 10px; color: var(--ui-muted, #819078); }
+.fuel-production { font-size: 10px; }
+.fuel-production strong { margin-left: auto; font-weight: 500; font-variant-numeric: tabular-nums; }
+.fuel-garage-card > p { border-top: 1px solid var(--ui-border, #dadfd0); margin: 12px 0 0; padding-top: 10px; font-size: 9px; color: var(--ui-muted, #819078); line-height: 1.7; }
+.fuel-carrying { margin-top: 13px; padding: 10px; background: color-mix(in srgb, #d2aa67 12%, transparent); border-radius: 9px; }
+.fuel-carrying > span { display: grid; gap: 4px; }
+.fuel-carrying strong { font-weight: 500; }
+.fuel-carrying small { color: var(--ui-muted, #819078); font-size: 9px; }
+.fuel-home-button { margin-top: 12px; justify-content: center; width: 100%; min-height: 38px; color: var(--ui-ink, #354b3e); background: color-mix(in srgb, var(--fuel-green) 13%, transparent); border: 1px solid var(--ui-border, #dadfd0); border-radius: 9px; font-size: 10px; }
+.fuel-home-button:disabled { opacity: .48; cursor: default; }
+.fuel-theft { border-top: 1px solid var(--ui-border, #dadfd0); margin-top: 16px; padding-top: 14px; }
+.fuel-theft-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fuel-theft-title > strong { white-space: nowrap; font-weight: 500; font-size: 10px; }
+.fuel-theft > p, .fuel-note, .fuel-offline > p { font-size: 10px; color: var(--ui-muted, #819078); line-height: 1.8; }
+.fuel-steal-button { position: relative; overflow: hidden; width: 100%; min-height: 45px; padding: 10px; color: var(--ui-ink, #354b3e); background: color-mix(in srgb, var(--fuel-green) 10%, transparent); border: 1px solid var(--ui-border, #dadfd0); border-radius: 10px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.fuel-steal-button > span { position: relative; display: flex; justify-content: center; align-items: center; gap: 7px; font-size: 11px; }
+.fuel-steal-button > i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--fuel-green) 30%, transparent); transition: width .1s linear; }
+.fuel-steal-button.is-holding { border-color: var(--fuel-green); }
+.fuel-steal-button:disabled { opacity: .42; cursor: default; }
+.fuel-theft-progress { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.fuel-offline > button { display: flex; align-items: center; gap: 8px; color: var(--fuel-green); font-size: 11px; min-height: 36px; }
+.fuel-hud button:focus-visible { outline: 2px solid var(--fuel-green); outline-offset: 3px; }
+@media (min-width: 1600px) { .fuel-hud { left: 64px; } }
+@media (min-width: 901px) and (max-width: 1100px) { .fuel-hud { top: 116px; left: 28px; } }
+@media (max-width: 900px) { .fuel-hud { left: 22px; top: 137px; } }
+@media (max-width: 760px) {
+  .fuel-hud { left: 14px; width: 140px; }
+  .fuel-pill { min-height: 48px; gap: 7px; padding: 8px 10px; border-radius: 11px; }
+  .fuel-pill-copy strong { font-size: 15px; }
+  .fuel-pill-copy > small { font-size: 8px; }
+  .fuel-pill-unit { display: none; }
+  .fuel-pill-icon > svg { width: 16px; }
+  .fuel-near-hint > button { padding: 8px 10px; }
+  .fuel-near-hint small { font-size: 8px; }
+  .fuel-panel { top: calc(100% + 8px); left: 0; width: min(304px, calc(100vw - 28px)); max-height: calc(100svh - 215px); }
+}
+@media (max-width: 359px) { .fuel-hud { width: 124px; } .fuel-pill > svg { display: none; } }
+@media (prefers-reduced-motion: reduce) { .fuel-hud *, .fuel-hud *::before { transition: none !important; } }

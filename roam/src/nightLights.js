@@ -126,7 +126,7 @@ export function createNightLights(scene, car) {
 
   const garage = group(-8, 0, -1, 0.16);
   frame(garage, 2.44, 0.39, garageTube, 0, 1.96, 1.21);
-  textSign(garage, "GARAGE", garageTube, 0, 1.96, 1.245, 1.92, 0.29);
+  textSign(garage, "AUTO SHOP", garageTube, 0, 1.96, 1.245, 1.92, 0.29);
   frame(garage, 0.87, 0.93, garageTube, -0.62, 1.28, 1.175, 0.034);
   frame(garage, 0.67, 1.44, photoTube, 0.62, 0.83, 1.175, 0.026);
   // A small star by the bench gives the cabin a recognizable night landmark.

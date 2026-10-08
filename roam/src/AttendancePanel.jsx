@@ -210,7 +210,7 @@ export function AttendancePanel({ multiplayer, onJoin, onGarage }) {
               </span>
               {receipt.duplicate
                 ? ` 이미 모두 보유해 ${number(receipt.refund || DUPLICATE_REFUND)}코인을 받았어요.`
-                : " 내 차고지에 담았어요."}
+                : " 내 컬렉션에 담았어요."}
             </p>
           ) : (
             <p>
@@ -218,7 +218,7 @@ export function AttendancePanel({ multiplayer, onJoin, onGarage }) {
                 ? "내일도 이곳에서 만나요."
                 : reward.kind === "vehicle"
                   ? "아직 없는 차량을 먼저, 무작위로 선물해 드려요."
-                  : "차고지에서 나만의 컬렉션을 모아 보세요."}
+                  : "정비소에서 나만의 컬렉션을 모아 보세요."}
             </p>
           )}
         </div>
@@ -254,7 +254,7 @@ export function AttendancePanel({ multiplayer, onJoin, onGarage }) {
         </button>
         {receipt && (
           <button className="attendance-garage" onClick={onGarage}>
-            차고지로 가기 <ArrowRight size={14} />
+            정비소로 가기 <ArrowRight size={14} />
           </button>
         )}
       </div>

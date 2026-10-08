@@ -42,7 +42,7 @@ test("stadium projection is continuous across straight/curve seams and lap bound
 });
 
 test("the outer duel is a continuous closed stadium with matching projection and two side-by-side starts", () => {
-  assert.ok(DUEL_LENGTH > 230 && DUEL_LENGTH < 235);
+  assert.ok(DUEL_LENGTH > 255 && DUEL_LENGTH < 260);
   for (const lane of [0, 1]) {
     const start = duelStart(lane);
     assert.equal(start.heading, Math.PI);
