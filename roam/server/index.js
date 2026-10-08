@@ -9,6 +9,7 @@ import { isDriveable, trackPoint } from "../src/gameConfig.js";
 import { DUEL_MOVEMENT_LIMITS } from "../src/duelObstacles.js";
 import { getVehicleProfile } from "../src/vehicleDynamics.js";
 import { ARENA, arenaGuardContact } from "../src/arenaConfig.js";
+import { SOCCER, isSoccerDriveable } from "../src/soccerConfig.js";
 import {
   CAR_CONTACT,
   carContact,
@@ -503,6 +504,7 @@ export function createGameServer({
       races: game.snapshotRaces(),
       arenas: game.snapshotArenas(),
       arenaHonors: game.snapshotArenaHonors(),
+      soccer: game.snapshotSoccer(),
       sprays: game.recentSprays(),
     });
     broadcastState();
@@ -518,6 +520,8 @@ export function createGameServer({
   function checkCarContacts(session, previous, now) {
     const arena = game.arenaFor(session.player.id);
     const activeArena = arena?.status === "running" ? arena : null;
+    const soccer = game.soccerFor(session.player.id);
+    const activeSoccer = soccer?.status === "playing" ? soccer : null;
     const elapsed = (now - session.contactAt) / 1000;
     let velocity = movementVelocity(previous, session.player, elapsed);
     if (
@@ -542,10 +546,13 @@ export function createGameServer({
       return;
     for (const other of players.values()) {
       const otherArena = game.arenaFor(other.player.id);
+      const otherSoccer = game.soccerFor(other.player.id);
       if (
         other === session ||
         now < other.contactImmuneUntil ||
         !game.canMove(other.player.id) ||
+        ((activeSoccer || (otherSoccer && otherSoccer.status !== "waiting")) &&
+          otherSoccer?.id !== activeSoccer?.id) ||
         ((activeArena || (otherArena && otherArena.status !== "waiting")) &&
           otherArena?.id !== activeArena?.id)
       )
@@ -565,7 +572,11 @@ export function createGameServer({
         otherVelocity,
         getVehicleProfile(session.player.cosmetics.body),
         getVehicleProfile(other.player.cosmetics.body),
-        activeArena ? { mode: "arena" } : undefined,
+        activeArena
+          ? { mode: "arena" }
+          : activeSoccer
+            ? { mode: "soccer" }
+            : undefined,
       );
       if (!impact) continue;
       impactCooldowns.set(key, now);
@@ -580,6 +591,7 @@ export function createGameServer({
       broadcast({
         type: "car:impact",
         ...(activeArena ? { arenaId: activeArena.id } : {}),
+        ...(activeSoccer ? { soccerId: activeSoccer.id } : {}),
         id: randomUUID(),
         x: impact.x,
         z: impact.z,
@@ -607,12 +619,20 @@ export function createGameServer({
       return;
     const membership = game.arenaFor(session.player.id);
     const arena = membership?.status === "running" ? membership : null;
-    const maxSpeed = arena ? ARENA.maxSpeed : MAX_MOVEMENT_SPEED;
+    const soccer = game.soccerFor(session.player.id);
+    const activeSoccer = soccer?.status === "playing" ? soccer : null;
+    const maxSpeed = arena
+      ? ARENA.maxSpeed
+      : activeSoccer
+        ? SOCCER.maxCarSpeed
+        : MAX_MOVEMENT_SPEED;
     if (
       !finite ||
       !(arena
         ? Math.hypot(x - ARENA.cx, z - ARENA.cz) <= arena.radius + 12
-        : isDriveable(x, z)) ||
+        : activeSoccer
+          ? isSoccerDriveable(x, z)
+          : isDriveable(x, z)) ||
       y < 0 ||
       y > DUEL_MOVEMENT_LIMITS.maxHeight
     ) {
@@ -657,7 +677,7 @@ export function createGameServer({
       }
     }
     const steps = Math.ceil(distance / 0.5);
-    for (let step = 1; !arena && step < steps; step += 1) {
+    for (let step = 1; !arena && !activeSoccer && step < steps; step += 1) {
       if (
         !isDriveable(
           session.player.x + ((x - session.player.x) * step) / steps,

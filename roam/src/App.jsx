@@ -37,6 +37,7 @@ import {
   Trophy,
   History,
   Eye,
+  CircleDot,
 } from "lucide-react";
 import { createWorld, ZONES } from "./world.js";
 import { useMultiplayer } from "./multiplayer.js";
@@ -45,6 +46,9 @@ import { useGallery } from "./gallery.js";
 import { useArenaHonors } from "./arenaHonors.js";
 import { ArenaChampion, ArenaHonorsPanel } from "./ArenaHonors.jsx";
 import { AttendanceButton, AttendancePanel } from "./AttendancePanel.jsx";
+import { FloatingChat } from "./FloatingChat.jsx";
+import { SoccerPanel, SoccerHud } from "./SoccerPanel.jsx";
+import { SOCCER } from "./soccerConfig.js";
 import {
   GaragePanel,
   ArenaPanel,
@@ -126,7 +130,7 @@ const FUN_SPOTS = [
   },
 ];
 
-function Modal({ section, onClose, children }) {
+function Modal({ section, onClose, children, className = "" }) {
   const ref = useRef();
   const galleryScroll = useRef(0);
   const previousSection = useRef(null);
@@ -150,7 +154,7 @@ function Modal({ section, onClose, children }) {
   return (
     <dialog
       ref={ref}
-      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""} ${section === "about" || section === "play" ? "game-modal" : ""} ${section === "attendance" ? "attendance-modal" : ""}`}
+      className={`modal ${section === "join" ? "join-modal" : ""} ${section === "photo" ? "photo-modal" : ""} ${section === "work" ? "gallery-modal" : ""} ${section === "about" || section === "play" ? "game-modal" : ""} ${section === "attendance" ? "attendance-modal" : ""} ${className}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -195,6 +199,7 @@ const circuitStart = [
   mapPoint(duelPoint(0, DUEL_TRACK.halfWidth)),
 ];
 const arenaMapCenter = mapPoint({ x: ARENA.cx, z: ARENA.cz });
+const soccerMapCenter = mapPoint({ x: SOCCER.cx, z: SOCCER.cz });
 const circuitBoundary = {
   left:
     Math.min(
@@ -205,8 +210,13 @@ const circuitBoundary = {
     Math.min(
       ...circuitOuter.map((point) => point.y),
       arenaMapCenter.y - ARENA.maxRadius * 2.5,
+      soccerMapCenter.y - SOCCER.halfWidth * 2.5,
     ) - 10,
-  right: Math.max(...circuitOuter.map((point) => point.x)) + 10,
+  right:
+    Math.max(
+      ...circuitOuter.map((point) => point.x),
+      soccerMapCenter.x + (SOCCER.halfLength + SOCCER.goalDepth) * 3.45,
+    ) + 10,
   bottom: Math.max(...circuitOuter.map((point) => point.y)) + 10,
 };
 const mapViewBox = `${circuitBoundary.left} ${circuitBoundary.top} ${circuitBoundary.right - circuitBoundary.left} ${circuitBoundary.bottom - circuitBoundary.top}`;
@@ -220,8 +230,45 @@ function MiniMap({ state, onSelect, large = false, peers = [], arena = null }) {
     <div className={`minimap ${large ? "large-map" : ""}`}>
       <svg
         viewBox={mapViewBox}
-        aria-label="우리 아지트와 아래 순환 레일, 왼쪽 위 콜로세움과 자동차 위치"
+        aria-label="우리 아지트와 순환 레일, 왼쪽 콜로세움, 오른쪽 축구장과 자동차 위치"
       >
+        <g transform={`translate(${soccerMapCenter.x},${soccerMapCenter.y})`}>
+          <rect
+            x={-SOCCER.halfLength * 3.45}
+            y={-SOCCER.halfWidth * 2.5}
+            width={SOCCER.halfLength * 6.9}
+            height={SOCCER.halfWidth * 5}
+            rx="3"
+            fill="#7e9c74"
+            stroke="#dce7ca"
+            strokeWidth="2"
+          />
+          <path
+            d={`M0 ${-SOCCER.halfWidth * 2.5}V${SOCCER.halfWidth * 2.5}`}
+            stroke="#dce7ca"
+            strokeWidth="1.5"
+          />
+          <ellipse
+            rx="10"
+            ry="8"
+            fill="none"
+            stroke="#dce7ca"
+            strokeWidth="1.5"
+          />
+          <path
+            d={`M${-SOCCER.halfLength * 3.45} -10V10`}
+            stroke="#7bcaef"
+            strokeWidth="5"
+          />
+          <path
+            d={`M${SOCCER.halfLength * 3.45} -10V10`}
+            stroke="#eab27a"
+            strokeWidth="5"
+          />
+          <text y="-16" fill="#fff9e9" fontSize="9" textAnchor="middle">
+            축구장
+          </text>
+        </g>
         <ellipse
           cx={arenaMapCenter.x}
           cy={arenaMapCenter.y}
@@ -354,6 +401,13 @@ function MiniMap({ state, onSelect, large = false, peers = [], arena = null }) {
           <MapPin size={16} />
         </button>
       )}
+      {large && (
+        <button className="map-destination" onClick={() => onSelect("soccer")}>
+          <span style={{ background: "#7e9c74" }} />
+          <span>축구장 둘러보기</span>
+          <MapPin size={16} />
+        </button>
+      )}
     </div>
   );
 }
@@ -439,6 +493,7 @@ export default function App() {
     toastTimer = useRef(),
     railAfterJoin = useRef(false),
     attendanceAfterJoin = useRef(false);
+  const playAfterJoin = useRef(false);
   const notify = useCallback((text) => {
     setToast(text);
     clearTimeout(toastTimer.current);
@@ -476,7 +531,16 @@ export default function App() {
   const spectatingBlocked =
     ["countdown", "running"].includes(multiplayer.currentArena?.status) ||
     Boolean(multiplayer.currentRace);
-  const arenaSpectating = Boolean(state.arenaSpectating) && !spectatingBlocked;
+  const gameSpectatingBlocked =
+    spectatingBlocked ||
+    Boolean(
+      multiplayer.currentSoccer &&
+        multiplayer.currentSoccer.status !== "waiting",
+    );
+  const arenaSpectating =
+    Boolean(state.arenaSpectating) && !gameSpectatingBlocked;
+  const soccerSpectating =
+    Boolean(state.soccerSpectating) && !gameSpectatingBlocked;
   const gallery = useGallery(
     section === "work" || (section === "photo" && photoView?.archived),
     multiplayer.galleryVersion,
@@ -491,6 +555,7 @@ export default function App() {
           positions.clear();
           positions.set("self", s.car);
           positions.set("arena", s.arenaMarker);
+          positions.set("soccer", s.soccerMarker);
           for (const label of s.labels)
             positions.set(`zone:${label.id}`, label);
           for (const peer of s.peers) positions.set(`peer:${peer.id}`, peer);
@@ -556,7 +621,12 @@ export default function App() {
   useEffect(() => {
     if (multiplayer.currentRace) setPlayMode("race");
     else if (multiplayer.currentArena) setPlayMode("arena");
-  }, [multiplayer.currentRace?.id, multiplayer.currentArena?.id]);
+    else if (multiplayer.currentSoccer) setPlayMode("soccer");
+  }, [
+    multiplayer.currentRace?.id,
+    multiplayer.currentArena?.id,
+    multiplayer.currentSoccer?.id,
+  ]);
   useEffect(() => {
     if (ready) world.current?.setArena(multiplayer.currentArena);
   }, [ready, multiplayer.currentArena]);
@@ -564,8 +634,38 @@ export default function App() {
     if (ready) world.current?.setArenaDisplay(arenaDisplay);
   }, [ready, arenaDisplay]);
   useEffect(() => {
-    if (spectatingBlocked) world.current?.setArenaSpectating(false);
-  }, [spectatingBlocked]);
+    if (gameSpectatingBlocked) {
+      world.current?.setArenaSpectating(false);
+      world.current?.setSoccerSpectating(false);
+    }
+  }, [gameSpectatingBlocked]);
+  useEffect(() => {
+    if (ready) world.current?.setSoccer(multiplayer.currentSoccer);
+  }, [ready, multiplayer.currentSoccer]);
+  useEffect(() => {
+    if (ready) world.current?.setSoccerDisplay(multiplayer.soccer);
+  }, [ready, multiplayer.soccer]);
+  useEffect(() => {
+    if (
+      multiplayer.currentSoccer &&
+      multiplayer.currentSoccer.status !== "waiting"
+    )
+      setSection(null);
+  }, [multiplayer.currentSoccer?.id, multiplayer.currentSoccer?.status]);
+  useEffect(() => {
+    const result = multiplayer.soccerResult;
+    if (
+      !result ||
+      (!result.participantIds?.includes(multiplayer.player?.id) &&
+        !soccerSpectating)
+    )
+      return;
+    notify(
+      result.winnerTeam
+        ? `${result.winnerTeam === "blue" ? "파랑" : "주황"} 팀이 ${result.scores.blue}:${result.scores.orange}로 승리했어요! ⚽`
+        : "축구 경기가 종료됐어요.",
+    );
+  }, [multiplayer.soccerResult]);
   useEffect(() => {
     if (["countdown", "running"].includes(multiplayer.currentArena?.status))
       setSection(null);
@@ -647,6 +747,7 @@ export default function App() {
       multiplayer.cancelJoin();
       railAfterJoin.current = false;
       attendanceAfterJoin.current = false;
+      playAfterJoin.current = false;
     }
     if (section === "photo" && photoView?.archived) {
       setSection("work");
@@ -657,8 +758,15 @@ export default function App() {
   async function join(e) {
     e.preventDefault();
     if (await multiplayer.join(nickname)) {
-      setSection(attendanceAfterJoin.current ? "attendance" : null);
+      setSection(
+        attendanceAfterJoin.current
+          ? "attendance"
+          : playAfterJoin.current
+            ? "play"
+            : null,
+      );
       attendanceAfterJoin.current = false;
+      playAfterJoin.current = false;
       setChatOpen(true);
       if (railAfterJoin.current) {
         railAfterJoin.current = false;
@@ -678,12 +786,13 @@ export default function App() {
   }
   function visit(id) {
     const destination = id;
-    if (destination === "arena") {
-      if (spectatingBlocked) {
+    if (destination === "arena" || destination === "soccer") {
+      if (gameSpectatingBlocked) {
         notify("참가 중인 경기가 끝난 뒤 관전할 수 있어요.");
         return;
       }
-      world.current?.goTo("arena");
+      if (destination === "soccer") world.current?.setSoccerSpectating(true);
+      else world.current?.goTo("arena");
       setSection(null);
       return;
     }
@@ -945,7 +1054,18 @@ export default function App() {
           open("play");
         }}
       />
-      {!multiplayer.currentArena && (
+      <SoccerHud
+        soccer={
+          multiplayer.currentSoccer ||
+          (soccerSpectating ? multiplayer.soccer : null)
+        }
+        player={multiplayer.player}
+        open={() => {
+          setPlayMode("soccer");
+          open("play");
+        }}
+      />
+      {!multiplayer.currentArena && !multiplayer.currentSoccer && (
         <RaceHud
           race={multiplayer.currentRace}
           onOpen={() => {
@@ -954,47 +1074,65 @@ export default function App() {
           }}
         />
       )}
-      {!multiplayer.currentRace && !multiplayer.currentArena && (
-        <button
-          className={`rail-status ${moved ? "has-moved" : ""} ${state.track?.onTrack ? "on-track" : ""}`}
-          onClick={() =>
-            !multiplayer.connected || !state.track?.onTrack
-              ? visit("track")
-              : open("play")
-          }
-        >
-          <Flag size={16} />
-          <span>
-            <strong>
-              {state.track?.onTrack && multiplayer.connected
-                ? `완주 진행 ${Math.round(multiplayer.lapProgress.progress * 100)}%`
-                : "레일 한 바퀴 달리기"}
-            </strong>
-            <small>
-              {multiplayer.connected
-                ? `한 바퀴 완주 · +${LAP_REWARD}코인`
-                : "닉네임 입장 후 코인 적립"}
-            </small>
-          </span>
-          {state.track?.onTrack && multiplayer.connected && (
-            <span
-              className="rail-status-progress"
-              aria-hidden="true"
-              style={{
-                "--progress": `${Math.round(multiplayer.lapProgress.progress * 100)}%`,
-              }}
-            />
-          )}
-        </button>
-      )}
+      {!multiplayer.currentRace &&
+        !multiplayer.currentArena &&
+        !multiplayer.currentSoccer &&
+        !soccerSpectating && (
+          <button
+            className={`rail-status ${moved ? "has-moved" : ""} ${state.track?.onTrack ? "on-track" : ""}`}
+            onClick={() =>
+              !multiplayer.connected || !state.track?.onTrack
+                ? visit("track")
+                : open("play")
+            }
+          >
+            <Flag size={16} />
+            <span>
+              <strong>
+                {state.track?.onTrack && multiplayer.connected
+                  ? `완주 진행 ${Math.round(multiplayer.lapProgress.progress * 100)}%`
+                  : "레일 한 바퀴 달리기"}
+              </strong>
+              <small>
+                {multiplayer.connected
+                  ? `한 바퀴 완주 · +${LAP_REWARD}코인`
+                  : "닉네임 입장 후 코인 적립"}
+              </small>
+            </span>
+            {state.track?.onTrack && multiplayer.connected && (
+              <span
+                className="rail-status-progress"
+                aria-hidden="true"
+                style={{
+                  "--progress": `${Math.round(multiplayer.lapProgress.progress * 100)}%`,
+                }}
+              />
+            )}
+          </button>
+        )}
       <div className="world-labels" aria-label="함께 놀 곳">
-        {!spectatingBlocked && !arenaSpectating && (
+        {!gameSpectatingBlocked && !arenaSpectating && !soccerSpectating && (
           <ArenaChampion
             latest={arenaHonors.honors.latest}
             anchorRef={anchorRef("arena")}
             onWatch={() => world.current?.setArenaSpectating(true)}
             onHistory={() => open("honors")}
           />
+        )}
+        {!gameSpectatingBlocked && !arenaSpectating && !soccerSpectating && (
+          <button
+            ref={anchorRef("soccer")}
+            className="world-anchor world-label"
+            onClick={() => {
+              setPlayMode("soccer");
+              open("play");
+            }}
+          >
+            <CircleDot size={13} />
+            <span>자동차 축구</span>
+            <Plus size={13} />
+            <i />
+          </button>
         )}
         {ZONES.map((label, i) => (
           <button
@@ -1091,22 +1229,7 @@ export default function App() {
       </div>
 
       {chatOpen && (
-        <section className="chat-panel hangout-chat" aria-label="모두의 대화">
-          <div className="chat-header">
-            <div>
-              <strong>
-                우리들의 수다 <span className="chat-spark">✳</span>
-              </strong>
-              <span>별일 없는 이야기도 환영이에요.</span>
-            </div>
-            <button
-              className="bare-icon"
-              onClick={() => setChatOpen(false)}
-              aria-label="채팅 닫기"
-            >
-              <X size={18} />
-            </button>
-          </div>
+        <FloatingChat onClose={() => setChatOpen(false)}>
           <div className="chat-people">
             <span
               className={`status-light ${multiplayer.connected ? "online" : ""}`}
@@ -1191,7 +1314,7 @@ export default function App() {
               <Send size={17} />
             </button>
           </form>
-        </section>
+        </FloatingChat>
       )}
 
       <aside className="map-card">
@@ -1274,7 +1397,29 @@ export default function App() {
           </button>
         </div>
       )}
-      {nearZone && !section && !arenaSpectating && (
+      {soccerSpectating && (
+        <div className="arena-spectator-actions">
+          <button
+            className="arena-spectator-exit"
+            onClick={() => world.current?.setSoccerSpectating(false)}
+            aria-label="축구 관전을 끝내고 내 자동차 보기"
+          >
+            <Eye size={16} />
+            <span>관전 끝내기</span>
+            <X size={14} />
+          </button>
+          <button
+            className="arena-spectator-history"
+            onClick={() => {
+              setPlayMode("soccer");
+              open("play");
+            }}
+          >
+            <CircleDot size={14} /> 축구 참가
+          </button>
+        </div>
+      )}
+      {nearZone && !section && !arenaSpectating && !soccerSpectating && (
         <div className="interaction-prompt">
           <button onClick={() => open(nearZone.id)}>
             <kbd>E</kbd>
@@ -1373,7 +1518,13 @@ export default function App() {
         </div>
       )}
 
-      <Modal section={section} onClose={close}>
+      <Modal
+        section={section}
+        onClose={close}
+        className={
+          section === "play" && playMode === "soccer" ? "soccer-modal" : ""
+        }
+      >
         {section === "join" && (
           <>
             <div className="modal-eyebrow">
@@ -1611,14 +1762,18 @@ export default function App() {
                 )
                   return;
                 event.preventDefault();
+                const modes = ["arena", "race", "soccer"];
                 const next =
-                  event.key === "Home"
-                    ? "arena"
-                    : event.key === "End"
-                      ? "race"
-                      : playMode === "arena"
-                        ? "race"
-                        : "arena";
+                  modes[
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? modes.length - 1
+                        : (modes.indexOf(playMode) +
+                            (event.key === "ArrowRight" ? 1 : -1) +
+                            modes.length) %
+                          modes.length
+                  ];
                 setPlayMode(next);
                 event.currentTarget.querySelector(`#play-tab-${next}`)?.focus();
               }}
@@ -1643,6 +1798,16 @@ export default function App() {
               >
                 <Flag size={16} /> 1대1 레이싱
               </button>
+              <button
+                id="play-tab-soccer"
+                role="tab"
+                tabIndex={playMode === "soccer" ? 0 : -1}
+                aria-selected={playMode === "soccer"}
+                aria-controls="play-mode-panel"
+                onClick={() => setPlayMode("soccer")}
+              >
+                <CircleDot size={16} /> 자동차 축구
+              </button>
             </div>
             <div
               id="play-mode-panel"
@@ -1657,7 +1822,7 @@ export default function App() {
                   onPreview={() => visit("arena")}
                   onResume={close}
                 />
-              ) : (
+              ) : playMode === "race" ? (
                 <RacePanel
                   multiplayer={multiplayer}
                   onJoin={() => open("join")}
@@ -1666,6 +1831,20 @@ export default function App() {
                     multiplayer.currentRace.status !== "waiting"
                       ? close()
                       : visit("track")
+                  }
+                />
+              ) : (
+                <SoccerPanel
+                  multiplayer={multiplayer}
+                  onJoin={() => {
+                    playAfterJoin.current = true;
+                    open("join");
+                  }}
+                  onWatch={() =>
+                    multiplayer.currentSoccer &&
+                    multiplayer.currentSoccer.status !== "waiting"
+                      ? close()
+                      : visit("soccer")
                   }
                 />
               )}
@@ -1677,8 +1856,8 @@ export default function App() {
             <div className="modal-eyebrow">OUR LITTLE WORLD</div>
             <h2 id="modal-title">어디서 만날까요?</h2>
             <p className="modal-intro">
-              만나고 싶은 장소를 골라 이동해요. 왼쪽 위 콜로세움은 참가하지
-              않고도 먼저 둘러볼 수 있어요.
+              만나고 싶은 장소를 골라 이동해요. 왼쪽 위 콜로세움과 오른쪽
+              축구장은 참가하지 않고도 관전할 수 있어요.
             </p>
             <MiniMap
               state={state}

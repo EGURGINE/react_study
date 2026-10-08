@@ -482,7 +482,9 @@ export function GaragePanel({ multiplayer, onJoin, onTrack }) {
   const busy = multiplayer.gameBusy || opening;
   const available = Boolean(multiplayer.connected && profile);
   const bodyLocked = Boolean(
-    multiplayer.currentArena || multiplayer.currentRace,
+    multiplayer.currentArena ||
+      multiplayer.currentRace ||
+      multiplayer.currentSoccer,
   );
   const collection = ITEMS.filter(
     (item) =>
@@ -824,7 +826,9 @@ export function ArenaPanel({
     (player) => player.id === multiplayer.player?.id,
   );
   const spectator = current && !isWaiting && participant?.alive === false;
-  const legacyBusy = Boolean(multiplayer.currentRace);
+  const legacyBusy = Boolean(
+    multiplayer.currentRace || multiplayer.currentSoccer,
+  );
   const arenaInUse = (multiplayer.arenas || []).some(
     (arena) => arena.id !== current?.id && arena.status !== "waiting",
   );
@@ -1193,7 +1197,9 @@ export function RacePanel({ multiplayer, onJoin, onTrack }) {
   );
   const coins = multiplayer.profile?.coins || 0;
   const available = Boolean(multiplayer.connected && multiplayer.profile);
-  const arenaBusy = Boolean(multiplayer.currentArena);
+  const arenaBusy = Boolean(
+    multiplayer.currentArena || multiplayer.currentSoccer,
+  );
   async function action(type, payload) {
     setError("");
     const response = await multiplayer.gameAction(type, payload);
@@ -1330,7 +1336,7 @@ export function RacePanel({ multiplayer, onJoin, onTrack }) {
           )}
           {arenaBusy && (
             <p className="game-footnote">
-              콜로세움 참가를 마친 뒤 레이싱을 시작할 수 있어요.
+              참가 중인 경기를 마친 뒤 레이싱을 시작할 수 있어요.
             </p>
           )}
         </section>

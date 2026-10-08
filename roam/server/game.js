@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createArenaController } from "./arena.js";
 import { createAttendanceController } from "./attendance.js";
+import { createSoccerController } from "./soccer.js";
 import {
   LAP_REWARD,
   CRATE_COST,
@@ -389,6 +390,7 @@ export function createGameEngine({
   }
 
   let arena;
+  let soccer;
   try {
     arena = createArenaController({
       db,
@@ -403,7 +405,16 @@ export function createGameEngine({
       now,
       random,
       fail,
-      hasRace: (id) => Boolean(raceFor(id)),
+      hasRace: (id) => Boolean(raceFor(id) || soccer?.has(id)),
+    });
+    soccer = createSoccerController({
+      peers,
+      resetLap,
+      teleport,
+      broadcast,
+      now,
+      fail,
+      hasOtherGame: (id) => Boolean(raceFor(id) || arena.has(id)),
     });
   } catch (error) {
     db.close();
@@ -508,6 +519,7 @@ export function createGameEngine({
     if (!peer) return;
     const race = raceFor(playerId);
     try {
+      soccer.detach(playerId);
       arena.detach(playerId);
       if (race)
         settle(
@@ -528,6 +540,7 @@ export function createGameEngine({
   function tick(includeArena = true) {
     if (closed) return;
     const time = now();
+    soccer.tick();
     if (includeArena) arena.tick();
     for (const race of [...races.values()]) {
       if (time >= race.expiresAt) {
@@ -554,6 +567,7 @@ export function createGameEngine({
     const peer = peers.get(playerId);
     if (!peer || closed) return;
     tick(false);
+    if (soccer.observe(playerId, pose)) return;
     if (arena.observe(playerId, pose)) return;
     const race = raceFor(playerId);
     if (race?.status === "countdown") return;
@@ -669,6 +683,11 @@ export function createGameEngine({
       "arena:leave": ["arenaId"],
       "attendance:claim": [],
       "attendance:status": [],
+      "soccer:create": [],
+      "soccer:join": ["soccerId", "team"],
+      "soccer:team": ["soccerId", "team"],
+      "soccer:start": ["soccerId"],
+      "soccer:leave": ["soccerId"],
       spray: [],
     };
     const allowed = Object.hasOwn(fields, data.action)
@@ -739,6 +758,10 @@ export function createGameEngine({
         let details = {};
         if (data.action === "attendance:claim") {
           details = attendance.claim(peer.accountId, time);
+        } else if (data.action.startsWith("soccer:")) {
+          const planned = soccer.plan(playerId, data, time);
+          details = planned.details;
+          effect = planned.effect;
         } else if (data.action.startsWith("arena:")) {
           const planned = arena.plan(playerId, data, time);
           details = planned.details;
@@ -770,7 +793,7 @@ export function createGameEngine({
           if (
             item.type === "body" &&
             item.id !== current.equipped.body &&
-            (raceFor(playerId) || arena.has(playerId))
+            (raceFor(playerId) || arena.has(playerId) || soccer.has(playerId))
           )
             fail(
               "대결을 기다리거나 달리는 동안에는 차체를 바꿀 수 없어요. 대결이 끝난 뒤 변경해 주세요.",
@@ -788,7 +811,7 @@ export function createGameEngine({
             data.stake > 10_000
           )
             fail("배팅은 코인 1~10,000개로 정해 주세요.", "invalid_stake");
-          if (raceFor(playerId) || arena.has(playerId))
+          if (raceFor(playerId) || arena.has(playerId) || soccer.has(playerId))
             fail("이미 참가 중인 대결이 있어요.", "already_racing");
           if (current.coins < data.stake)
             fail("배팅할 코인이 부족해요.", "insufficient_coins");
@@ -819,7 +842,7 @@ export function createGameEngine({
           const race = races.get(data.raceId);
           if (!race || race.status !== "waiting" || race.hostId === playerId)
             fail("참가할 수 없는 대결이에요.", "race_unavailable");
-          if (raceFor(playerId) || arena.has(playerId))
+          if (raceFor(playerId) || arena.has(playerId) || soccer.has(playerId))
             fail("이미 참가 중인 대결이 있어요.", "already_racing");
           if (
             [...races.values()].some(
@@ -943,6 +966,7 @@ export function createGameEngine({
           data.action === "crate" ||
           data.action === "attendance:claim" ||
           data.action.startsWith("race:") ||
+          data.action.startsWith("soccer:") ||
           data.action.startsWith("arena:")
         ) {
           db.prepare(
@@ -973,6 +997,7 @@ export function createGameEngine({
   function shutdown() {
     if (closed) return;
     try {
+      soccer.shutdown();
       arena.shutdown();
       for (const race of [...races.values()])
         settle(race, null, "server_restart");
@@ -996,18 +1021,23 @@ export function createGameEngine({
     snapshotRaces,
     snapshotArenas: arena.snapshot,
     snapshotArenaHonors: arena.snapshotHonors,
+    snapshotSoccer: soccer.snapshot,
+    soccerFor: soccer.soccerFor,
     arenaFor: arena.arenaFor,
     canMove: (id) =>
+      soccer.canMove(id) &&
       arena.canMove(id) &&
       !(raceFor(id)?.status === "countdown" && now() < raceFor(id).startsAt),
     interactArena: arena.interact,
     shutdown,
     beforeTeleport: (id) =>
+      (!soccer.has(id) || soccer.soccerFor(id).status === "waiting") &&
       !["countdown", "racing"].includes(raceFor(id)?.status) &&
       (!arena.arenaFor(id) || arena.arenaFor(id).status === "waiting"),
     isLocked: (id) => {
       const race = raceFor(id);
       return (
+        !soccer.canMove(id) ||
         !arena.canMove(id) ||
         (race?.status === "countdown" && now() < race.startsAt)
       );

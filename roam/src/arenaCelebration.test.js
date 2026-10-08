@@ -27,7 +27,7 @@ test("rockets become bounded colorful bursts, then release the same pooled buffe
   assert.equal(root.position.x, ARENA.cx);
   assert.equal(root.position.z, ARENA.cz);
   assert.equal(points.geometry.getAttribute("position").count, 384);
-  effect.setRadius(18);
+  effect.setRadius(ARENA.maxRadius);
   effect.setNight(1);
   effect.celebrate("start", "round");
   effect.update(0, 0);
@@ -36,6 +36,21 @@ test("rockets become bounded colorful bursts, then release the same pooled buffe
     count(points) > 1 && count(points) <= 23,
     "one launch has a head and trail",
   );
+  const positions = points.geometry.getAttribute("position").array;
+  const opacity = points.geometry.getAttribute("aOpacity").array;
+  for (let i = 0; i < opacity.length; i++) {
+    if (opacity[i] <= 0) continue;
+    assert.ok(
+      Math.hypot(positions[i * 3], positions[i * 3 + 2]) > ARENA.maxRadius,
+      "rockets launch outside the enlarged playing surface",
+    );
+    assert.ok(
+      points.geometry.boundingSphere.containsPoint(
+        new THREE.Vector3().fromArray(positions, i * 3),
+      ),
+      "expanded launches remain inside their culling bounds",
+    );
+  }
   tick(effect, 0.2, 1.8);
   assert.ok(
     count(points) > 200 && count(points) <= 384,

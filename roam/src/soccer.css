@@ -1,0 +1,436 @@
+.soccer-panel,
+.soccer-hud {
+  --soccer-blue: #7baec6;
+  --soccer-orange: #ce956c;
+  color: var(--ui-ink, #354839);
+}
+.social-app .soccer-modal {
+  width: min(730px, calc(100vw - 36px));
+}
+.soccer-rules {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px 18px;
+  margin: -5px 0 24px;
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+.soccer-rules > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.soccer-join-note {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.soccer-join-note button,
+.soccer-preview,
+.soccer-leave {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 0;
+  font-size: 11px;
+  color: var(--ui-accent);
+}
+.soccer-notice {
+  margin: 0 0 18px;
+  padding-left: 11px;
+  border-left: 2px solid var(--ui-accent);
+  color: var(--ui-muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.soccer-empty {
+  padding: 26px 18px 22px;
+  border: 1px solid var(--ui-border);
+  border-radius: 16px;
+  text-align: center;
+}
+.soccer-pitch-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  width: 148px;
+  height: 80px;
+  margin: 0 auto 22px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  color: var(--ui-accent);
+}
+.soccer-pitch-preview::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ui-border);
+}
+.soccer-pitch-preview > svg {
+  position: relative;
+  padding: 5px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--ui-panel);
+}
+.soccer-pitch-preview > i {
+  width: 22px;
+  height: 43px;
+  border: 1px solid var(--soccer-blue);
+  border-left: 0;
+}
+.soccer-pitch-preview > i:last-child {
+  border: 1px solid var(--soccer-orange);
+  border-right: 0;
+}
+.soccer-empty p {
+  margin: 12px 0 20px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+.soccer-empty > small {
+  display: block;
+  margin-top: 12px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-preview {
+  margin-top: 8px;
+}
+.soccer-match-state {
+  padding: 16px 20px 14px;
+  border: 1px solid var(--ui-border);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--ui-panel) 96%, var(--ui-accent));
+}
+.soccer-match-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-match-heading small {
+  font-size: inherit;
+}
+.soccer-match-state > p {
+  margin: 8px 0 0;
+  color: var(--ui-muted);
+  font-size: 11px;
+  text-align: center;
+}
+.soccer-match-state.is-goal > p {
+  color: var(--ui-accent);
+  font-weight: 550;
+}
+.soccer-scoreboard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 29px;
+  padding: 16px 0 3px;
+}
+.soccer-score-team {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  min-width: 78px;
+  gap: 4px;
+}
+.soccer-team-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-team-label > i,
+.soccer-team-card h3 > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--soccer-team-color);
+}
+.soccer-score-team.blue,
+.soccer-team-card.blue {
+  --soccer-team-color: var(--soccer-blue);
+}
+.soccer-score-team.orange,
+.soccer-team-card.orange {
+  --soccer-team-color: var(--soccer-orange);
+}
+.soccer-score-team > strong {
+  font-size: 37px;
+  font-weight: 500;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.soccer-score-team > small {
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-score-divider {
+  color: var(--ui-muted);
+  font-size: 22px;
+  font-weight: 400;
+}
+.soccer-teams {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  margin-top: 16px;
+}
+.soccer-team-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
+}
+.soccer-team-card > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 13px;
+  border-bottom: 1px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-panel) 93%, var(--soccer-team-color));
+}
+.soccer-team-card h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.soccer-team-card header > span {
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-team-card > ul {
+  flex: 1;
+  padding: 6px 12px;
+  margin: 0;
+  list-style: none;
+}
+.soccer-team-card li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 39px;
+  font-size: 11px;
+}
+.soccer-team-card li > svg {
+  color: var(--ui-muted);
+}
+.soccer-team-card li > strong {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 450;
+}
+.soccer-team-card li > em {
+  padding: 2px 4px;
+  color: var(--ui-muted);
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  font-size: 9px;
+  font-style: normal;
+}
+.soccer-team-card li.soccer-team-empty {
+  color: var(--ui-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.soccer-team-join {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 41px;
+  padding: 10px 6px;
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-ink);
+  background: color-mix(in srgb, var(--ui-panel) 89%, var(--soccer-team-color));
+  font-size: 10px;
+}
+.soccer-team-balance,
+.soccer-host-wait {
+  color: var(--ui-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.soccer-team-balance {
+  margin: 11px 0 19px;
+}
+.soccer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px 16px;
+}
+.soccer-panel .primary-button {
+  min-height: 44px;
+  gap: 8px;
+  padding: 12px 18px;
+  font-size: 12px;
+}
+.soccer-leave {
+  color: var(--ui-muted);
+}
+.soccer-footnote {
+  margin: 19px 0 0;
+  color: var(--ui-muted);
+  font-size: 10px;
+  line-height: 1.9;
+}
+.soccer-error {
+  padding: 12px 0 0;
+  margin: 10px 0 0;
+  color: var(--ui-ink);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.soccer-result {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 17px;
+  margin: 0 0 17px;
+  border: 1px solid var(--ui-border);
+  border-radius: 13px;
+}
+.soccer-result > svg {
+  color: var(--ui-accent);
+}
+.soccer-result small,
+.soccer-result strong {
+  display: block;
+}
+.soccer-result small {
+  margin-bottom: 6px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-result strong {
+  font-size: 16px;
+  font-weight: 550;
+}
+.soccer-result p {
+  margin: 6px 0 0;
+  color: var(--ui-muted);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.soccer-hud {
+  position: absolute;
+  z-index: 5;
+  top: 123px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 230px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 16px;
+  border: 1px solid var(--ui-border);
+  border-radius: 15px;
+  background: var(--ui-panel);
+  text-align: center;
+  pointer-events: auto;
+}
+.soccer-hud > button {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+}
+.soccer-hud-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-muted);
+  font-size: 10px;
+}
+.soccer-hud .soccer-scoreboard {
+  gap: 18px;
+  padding: 9px 0 5px;
+}
+.soccer-scoreboard.compact .soccer-score-team {
+  min-width: 42px;
+}
+.soccer-scoreboard.compact .soccer-score-team > strong {
+  font-size: 25px;
+}
+.soccer-hud-target {
+  color: var(--ui-muted);
+  font-size: 9px;
+}
+.soccer-hud > p {
+  padding-top: 9px;
+  margin: 9px 0 0;
+  border-top: 1px solid var(--ui-border);
+  color: var(--ui-accent);
+  font-size: 10px;
+  line-height: 1.6;
+}
+@media (max-width: 800px) {
+  .soccer-hud {
+    top: 184px;
+    width: 204px;
+    padding: 10px 13px;
+  }
+}
+@media (max-width: 520px) {
+  .social-app .soccer-modal {
+    padding: 29px 21px;
+  }
+  .soccer-rules {
+    gap: 8px 12px;
+    font-size: 10px;
+  }
+  .soccer-teams {
+    gap: 9px;
+  }
+  .soccer-team-card > header {
+    padding: 11px 9px;
+  }
+  .soccer-team-card > ul {
+    padding: 5px 8px;
+  }
+  .soccer-team-card li > svg:first-child {
+    display: none;
+  }
+  .soccer-match-state {
+    padding: 13px 15px;
+  }
+  .soccer-team-card h3 {
+    font-size: 11px;
+  }
+  .soccer-scoreboard {
+    gap: 20px;
+  }
+  .soccer-score-team {
+    min-width: 57px;
+  }
+  .soccer-score-team > strong {
+    font-size: 31px;
+  }
+}

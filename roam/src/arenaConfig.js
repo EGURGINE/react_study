@@ -2,7 +2,8 @@ const TAU = Math.PI * 2;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export const ARENA = Object.freeze({
-  cx: -61,
+  // Keep the expanded stands clear of the western racing road.
+  cx: -70,
   cz: 9,
   minPlayers: 2,
   maxPlayers: 10,
@@ -11,8 +12,8 @@ export const ARENA = Object.freeze({
   carRadius: 0.65,
   guardHeight: 2,
   guardThickness: 0.16,
-  minRadius: 10,
-  maxRadius: 18,
+  minRadius: 15,
+  maxRadius: 27,
   spawnClearance: 3,
 });
 export const ARENA_OBSTACLE_RULES = Object.freeze({
@@ -43,14 +44,26 @@ export const ARENA_OBSTACLE_RULES = Object.freeze({
 });
 
 export function arenaRadius(count) {
-  return 10 + clamp(Math.floor(Number(count) || 2), 2, 10) - 2;
+  const total = clamp(
+    Math.floor(Number(count) || ARENA.minPlayers),
+    ARENA.minPlayers,
+    ARENA.maxPlayers,
+  );
+  const progress =
+    (total - ARENA.minPlayers) / (ARENA.maxPlayers - ARENA.minPlayers);
+  return ARENA.minRadius + (ARENA.maxRadius - ARENA.minRadius) * progress;
 }
 
 export function arenaSpawn(index, count, radius = arenaRadius(count)) {
-  const total = clamp(Math.floor(Number(count) || 2), 2, 10);
+  const total = clamp(
+    Math.floor(Number(count) || ARENA.minPlayers),
+    ARENA.minPlayers,
+    ARENA.maxPlayers,
+  );
   const angle =
     ((((index % total) + total) % total) * TAU) / total - Math.PI / 2;
-  const distance = clamp(radius, 10, 18) - ARENA.spawnClearance;
+  const distance =
+    clamp(radius, ARENA.minRadius, ARENA.maxRadius) - ARENA.spawnClearance;
   return {
     x: ARENA.cx + Math.cos(angle) * distance,
     z: ARENA.cz + Math.sin(angle) * distance,
@@ -62,7 +75,11 @@ export function arenaSpawn(index, count, radius = arenaRadius(count)) {
 /** Randomness is consumed only by the server; clients receive the whole layout. */
 export function createArenaLayout(count, random = Math.random) {
   const radius = arenaRadius(count);
-  const total = clamp(Math.floor(Number(count) || 2), 2, 10);
+  const total = clamp(
+    Math.floor(Number(count) || ARENA.minPlayers),
+    ARENA.minPlayers,
+    ARENA.maxPlayers,
+  );
   const next = () => clamp(Number(random()) || 0, 0, 0.999999999);
   const rotation = next() * TAU;
   const guards = Array.from({ length: 4 }, (_, index) => ({

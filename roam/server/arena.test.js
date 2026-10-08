@@ -265,7 +265,10 @@ test("a failed payout rolls back its victory insert and preserves recoverable es
   action(users[0], "arena:start", { arenaId: id });
   room.advance(3000);
   game.tick();
-  Object.assign(users[1].player, { x: ARENA.cx + 11, z: ARENA.cz });
+  Object.assign(users[1].player, {
+    x: ARENA.cx + arenaRadius(2) + 1,
+    z: ARENA.cz,
+  });
   game.onMove(users[1].player.id, users[1].player);
   assert.throws(() => game.tick(), /simulated payout failure/);
   assert.equal(game.snapshotArenaHonors().total, 0);
@@ -327,6 +330,14 @@ test("arena entry is fixed at twenty coins, admits two to ten, and starts only o
     assert.equal(room.game.canMove(host.player.id), false);
     assert.equal(room.game.beforeTeleport(host.player.id), false);
     assert.equal(room.teleports.length, count);
+    for (const peer of round.users) {
+      assert.ok(
+        Math.abs(
+          Math.hypot(peer.player.x - ARENA.cx, peer.player.z - ARENA.cz) -
+            (started.arena.radius - ARENA.spawnClearance),
+        ) < 1e-8,
+      );
+    }
     assert.deepEqual(
       room.action(host, "arena:start", { arenaId: round.id }, requestId).arena,
       started.arena,

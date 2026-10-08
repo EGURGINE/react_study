@@ -17,6 +17,8 @@ import { createGalleryStore } from "./gallery.js";
 import { createGameEngine } from "./game.js";
 import { ITEMS, RARITIES, trackPoint } from "../src/gameConfig.js";
 import { getVehicleProfile } from "../src/vehicleDynamics.js";
+import { SOCCER, soccerSpawn } from "../src/soccerConfig.js";
+import { SOCCER_CAR_CONTACT } from "../src/carCollisions.js";
 
 const ORIGIN = "http://localhost:5173";
 const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0xff, 0xd9]);
@@ -1779,6 +1781,299 @@ test("gallery refuses oversized on-disk images and metadata instead of reading u
     " ".repeat(2049),
   );
   assert.equal((await fetch(`${room.base}/gallery`)).status, 503);
+});
+
+test("soccer car contacts deliver one opposite kick to each driver and accept their bounded rebound travel", async (t) => {
+  const room = await fixture(t);
+  const [blue, orange] = await Promise.all([room.connect(), room.connect()]);
+  const blueWelcome = await blue.join("축구 충돌 블루");
+  const orangeWelcome = await orange.join("축구 충돌 오렌지");
+  const failures = [];
+  for (const client of [blue, orange])
+    client.socket.on("message", (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === "error" && message.operation === "move")
+        failures.push(message);
+    });
+  const action = async (client, name, values = {}) => {
+    const requestId = `contact-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    client.send({ type: "game", action: name, requestId, ...values });
+    const result = await client.wait(
+      (message) =>
+        message.type === "game:result" && message.requestId === requestId,
+    );
+    assert.equal(result.ok, true, result.message);
+    return result;
+  };
+  const soccerId = (await action(blue, "soccer:create")).soccer.id;
+  await action(orange, "soccer:join", { soccerId, team: "orange" });
+  await action(blue, "soccer:start", { soccerId });
+  let bluePose = (await blue.wait((message) => message.type === "teleport"))
+    .player;
+  let orangePose = (await orange.wait((message) => message.type === "teleport"))
+    .player;
+  await blue.wait(
+    (message) =>
+      message.type === "soccer:state" && message.soccer?.status === "playing",
+    5000,
+  );
+  const sendPose = async (client, id, pose, delay = 85) => {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    client.send({
+      type: "move",
+      x: pose.x,
+      z: pose.z,
+      y: 0,
+      heading: Math.PI / 2,
+    });
+    await client.wait(
+      (message) =>
+        message.type === "state" &&
+        message.players.some(
+          (player) =>
+            player.id === id &&
+            Math.abs(player.x - pose.x) < 0.01 &&
+            Math.abs(player.z - pose.z) < 0.01,
+        ),
+    );
+    return pose;
+  };
+  const moveTo = async (client, id, start, target) => {
+    const steps = Math.ceil(
+      Math.hypot(target.x - start.x, target.z - start.z) / 1.5,
+    );
+    for (let index = 1; index <= steps; index += 1)
+      await sendPose(client, id, {
+        x: start.x + ((target.x - start.x) * index) / steps,
+        z: start.z + ((target.z - start.z) * index) / steps,
+      });
+    return target;
+  };
+  // Stage away from the center ball so this exercises car/car contact alone.
+  bluePose = await moveTo(blue, blueWelcome.player.id, bluePose, {
+    x: SOCCER.cx - 8,
+    z: SOCCER.cz + 6,
+  });
+  orangePose = await moveTo(orange, orangeWelcome.player.id, orangePose, {
+    x: SOCCER.cx + 3,
+    z: SOCCER.cz + 6,
+  });
+  bluePose = await moveTo(blue, blueWelcome.player.id, bluePose, {
+    x: SOCCER.cx + 0.8,
+    z: SOCCER.cz + 6,
+  });
+  bluePose = await sendPose(blue, blueWelcome.player.id, {
+    x: SOCCER.cx + 1.8,
+    z: SOCCER.cz + 6,
+  });
+  const impact = await blue.wait((message) => message.type === "car:impact");
+  const shared = await orange.wait((message) => message.type === "car:impact");
+  assert.deepEqual(shared, impact);
+  assert.equal(impact.soccerId, soccerId);
+  assert.equal(Object.hasOwn(impact, "arenaId"), false);
+  assert.equal(impact.participants.length, 2);
+  const kickA = impact.participants.find(
+    (player) => player.id === blueWelcome.player.id,
+  );
+  const kickB = impact.participants.find(
+    (player) => player.id === orangeWelcome.player.id,
+  );
+  assert.ok(kickA.vx <= -SOCCER_CAR_CONTACT.minImpulse);
+  assert.ok(kickB.vx >= SOCCER_CAR_CONTACT.minImpulse);
+  assert.equal(kickA.vx, -kickB.vx);
+  assert.equal(kickA.spin, -kickB.spin);
+  assert.ok(Math.abs(kickA.vx) <= SOCCER_CAR_CONTACT.maxImpulse);
+  assert.ok(Math.abs(kickB.vx) <= SOCCER_CAR_CONTACT.maxImpulse);
+  [bluePose, orangePose] = await Promise.all([
+    sendPose(blue, blueWelcome.player.id, {
+      x: bluePose.x + kickA.vx * 0.08,
+      z: bluePose.z + kickA.vz * 0.08,
+    }),
+    sendPose(orange, orangeWelcome.player.id, {
+      x: orangePose.x + kickB.vx * 0.08,
+      z: orangePose.z + kickB.vz * 0.08,
+    }),
+  ]);
+  assert.ok(orangePose.x - bluePose.x > 2);
+  // Drive plus recoil is clamped to 22 m/s by the client, below the server's
+  // 24 m/s allowance. Sustained capped updates must not snap either car back.
+  for (let index = 0; index < 8; index += 1)
+    bluePose = await sendPose(blue, blueWelcome.player.id, {
+      x: bluePose.x - 22 * 0.085,
+      z: bluePose.z,
+    });
+  assert.deepEqual(failures, []);
+  blue.send({
+    type: "car:impact",
+    soccerId,
+    participants: [
+      { id: orangeWelcome.player.id, vx: 999, vz: 999, spin: 999 },
+    ],
+  });
+  assert.equal(
+    (await blue.wait((message) => message.type === "error")).code,
+    "invalid_message",
+  );
+  assert.deepEqual(failures, []);
+});
+
+test("real WebSocket soccer owns goals, rejects field warps and broadcasts spectators and safe returns", async (t) => {
+  const room = await fixture(t);
+  const [blue, orange, outsider] = await Promise.all([
+    room.connect(),
+    room.connect(),
+    room.connect(),
+  ]);
+  const blueWelcome = await blue.join("블루 축구");
+  const orangeWelcome = await orange.join("오렌지 축구");
+  const outsideWelcome = await outsider.join("밖에서 응원");
+  assert.equal(blueWelcome.soccer, null);
+  const request = async (client, action, values = {}) => {
+    const requestId = `soccer-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    client.send({ type: "game", action, requestId, ...values });
+    return client.wait(
+      (message) =>
+        message.type === "game:result" && message.requestId === requestId,
+    );
+  };
+  const created = await request(blue, "soccer:create");
+  assert.equal(created.ok, true);
+  const soccerId = created.soccer.id;
+  assert.equal(
+    (await request(orange, "soccer:join", { soccerId, team: "orange" })).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await request(blue, "soccer:start", {
+        soccerId,
+        scores: { blue: 3, orange: 0 },
+      })
+    ).code,
+    "invalid_game",
+  );
+  assert.equal((await request(blue, "soccer:start", { soccerId })).ok, true);
+  const blueTeleport = await blue.wait(
+    (message) => message.type === "teleport",
+  );
+  const orangeTeleport = await orange.wait(
+    (message) => message.type === "teleport",
+  );
+  assert.equal(blueTeleport.player.x, soccerSpawn(0, 1, "blue").x);
+  assert.equal(orangeTeleport.player.x, soccerSpawn(0, 1, "orange").x);
+  blue.send({ type: "teleport", destination: "start" });
+  assert.equal(
+    (
+      await blue.wait(
+        (message) =>
+          message.type === "error" && message.operation === "teleport",
+      )
+    ).code,
+    "race_active",
+  );
+  const observer = await room.connect();
+  const observing = await observer.join("축구 관전자");
+  assert.equal(observing.soccer.id, soccerId);
+  assert.equal(observing.soccer.players.length, 2);
+  assert.equal(observing.soccer.status, "countdown");
+  assert.equal(Object.hasOwn(observing.soccer.players[0], "returnPose"), false);
+  await observer.wait(
+    (message) =>
+      message.type === "soccer:state" && message.soccer?.status === "playing",
+    5000,
+  );
+  blue.send({
+    type: "move",
+    x: SOCCER.cx + SOCCER.halfLength + 1,
+    z: SOCCER.cz,
+    y: 0,
+    heading: 0,
+  });
+  assert.equal(
+    (
+      await blue.wait(
+        (message) => message.type === "error" && message.operation === "move",
+      )
+    ).code,
+    "invalid_move",
+  );
+  outsider.send({ type: "move", x: SOCCER.cx, z: SOCCER.cz, y: 0, heading: 0 });
+  assert.equal(
+    (
+      await outsider.wait(
+        (message) => message.type === "error" && message.operation === "move",
+      )
+    ).code,
+    "invalid_move",
+  );
+  assert.equal(
+    (await request(outsider, "soccer:goal", { soccerId, team: "blue" })).code,
+    "invalid_game",
+  );
+  async function moveTo(client, id, start, target) {
+    const steps = Math.ceil(
+      Math.hypot(target.x - start.x, target.z - start.z) / 0.75,
+    );
+    for (let step = 1; step <= steps; step += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 70));
+      const x = start.x + ((target.x - start.x) * step) / steps;
+      const z = start.z + ((target.z - start.z) * step) / steps;
+      client.send({ type: "move", x, z, y: 0, heading: Math.PI / 2 });
+      await client.wait(
+        (message) =>
+          message.type === "state" &&
+          message.players.some(
+            (player) =>
+              player.id === id &&
+              Math.abs(player.x - x) < 0.01 &&
+              Math.abs(player.z - z) < 0.01,
+          ),
+      );
+    }
+  }
+  await moveTo(orange, orangeWelcome.player.id, orangeTeleport.player, {
+    x: SOCCER.cx + 8,
+    z: SOCCER.cz + 8,
+  });
+  await moveTo(blue, blueWelcome.player.id, blueTeleport.player, {
+    x: SOCCER.cx - 1.2,
+    z: SOCCER.cz,
+  });
+  const goal = await observer.wait(
+    (message) =>
+      message.type === "soccer:state" && message.soccer?.status === "goal",
+    10000,
+  );
+  assert.deepEqual(goal.soccer.scores, { blue: 1, orange: 0 });
+  assert.equal(goal.soccer.goalTeam, "blue");
+  const resumed = await observer.wait(
+    (message) =>
+      message.type === "soccer:state" &&
+      message.soccer?.status === "playing" &&
+      message.soccer.sequence === 2,
+    4000,
+  );
+  assert.equal(resumed.soccer.ball.x, SOCCER.cx);
+  assert.equal((await request(orange, "soccer:leave", { soccerId })).ok, true);
+  const finish = await blue.wait((message) => message.type === "soccer:finish");
+  assert.equal(finish.result.winnerTeam, null);
+  assert.equal(finish.result.reason, "team_empty");
+  const returned = await blue.wait(
+    (message) =>
+      message.type === "teleport" &&
+      message.player.x === blueWelcome.player.x &&
+      message.player.z === blueWelcome.player.z,
+  );
+  assert.equal(returned.player.id, blueWelcome.player.id);
+  const outsideState = await outsider.wait(
+    (message) =>
+      message.type === "state" &&
+      message.players.some((player) => player.id === outsideWelcome.player.id),
+  );
+  const outsidePlayer = outsideState.players.find(
+    (player) => player.id === outsideWelcome.player.id,
+  );
+  assert.equal(outsidePlayer.x, outsideWelcome.player.x);
 });
 
 test("clearing or disconnecting during gallery persistence never resurrects a car photo", async (t) => {

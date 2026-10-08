@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   CAR_CONTACT,
   ARENA_CAR_CONTACT,
+  SOCCER_CAR_CONTACT,
   carContact,
   movementVelocity,
 } from "./carCollisions.js";
@@ -121,6 +122,69 @@ test("arena mode preserves the original strong impulses and mass safety cap", ()
     Math.abs(impact.a.vx * light.mass + impact.b.vx * heavy.mass) < 1e-10,
   );
 });
+test("soccer contact kicks both cars while preserving mass, gentle contact and the speed cap", () => {
+  for (const speed of [0.7, 4, 8, 16, 48]) {
+    const hit = carContact(
+      pose(-2),
+      pose(-1),
+      pose(0),
+      { x: speed, z: 0 },
+      undefined,
+      undefined,
+      undefined,
+      { mode: "soccer" },
+    );
+    const expected = Math.min(14, Math.max(5.5, speed * 1.15));
+    assert.equal(hit.b.vx, expected);
+    assert.equal(hit.a.vx, -expected);
+    assert.equal(hit.a.spin, -hit.b.spin);
+    assert.ok(hit.strength <= 1);
+  }
+  for (const speed of [3, 12, 48]) {
+    const light = { mass: 0.7, bounce: 1.3 };
+    const heavy = { mass: 1.8, bounce: 0.68 };
+    const hit = carContact(
+      pose(-2),
+      pose(-1),
+      pose(0),
+      { x: speed, z: 0 },
+      { x: 0, z: 0 },
+      light,
+      heavy,
+      { mode: "soccer" },
+    );
+    assert.ok(hit.a.vx < 0 && hit.b.vx > 0);
+    assert.ok(Math.abs(hit.a.vx) > hit.b.vx);
+    assert.ok(Math.abs(hit.a.vx * light.mass + hit.b.vx * heavy.mass) < 1e-10);
+    assert.ok(Math.abs(hit.a.vx) <= SOCCER_CAR_CONTACT.maxImpulse);
+    assert.ok(hit.b.vx <= SOCCER_CAR_CONTACT.maxImpulse);
+  }
+  const side = carContact(
+    pose(0, -2),
+    pose(0, -1),
+    pose(0),
+    { x: 0, z: 8 },
+    undefined,
+    undefined,
+    undefined,
+    { mode: "soccer" },
+  );
+  assert.ok(side.a.vz < -5.5 && side.b.vz > 5.5);
+  assert.equal(
+    carContact(
+      pose(-1),
+      pose(-2),
+      pose(0),
+      { x: -8, z: 0 },
+      undefined,
+      undefined,
+      undefined,
+      { mode: "soccer" },
+    ),
+    null,
+  );
+});
+
 test("vehicle bounce changes restitution without removing impact safety caps", () => {
   const hit = (bounce) =>
     carContact(

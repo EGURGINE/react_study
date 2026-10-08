@@ -6,6 +6,18 @@ import { createDuelWorld } from "./duelWorld.js";
 import { createArenaWorld } from "./arenaWorld.js";
 import { createArenaCelebration } from "./arenaCelebration.js";
 import {
+  createSoccerWorld,
+  soccerViewSize,
+  soccerPoseTransfer,
+} from "./soccerWorld.js";
+import { SOCCER, isSoccerDriveable, clampSoccerPose } from "./soccerConfig.js";
+import {
+  SOCCER_IMPACT_DRAG,
+  resolveSoccerWall,
+  applySoccerCarImpulse,
+  soccerNavigationSpeed,
+} from "./soccerDriving.js";
+import {
   ARENA,
   ARENA_OBSTACLE_RULES,
   arenaGuardContact,
@@ -65,6 +77,7 @@ export const ZONES = [
   },
 ];
 const START = { x: 1.3, z: 7.8, heading: -Math.PI / 2.4 };
+const HOME_FOCUS = { x: 1.5, y: 2.5, z: 4 };
 
 export function createWorld(host, callbacks) {
   const scene = new THREE.Scene();
@@ -91,7 +104,11 @@ export function createWorld(host, callbacks) {
   const openedAt = performance.now();
   const lightingClock = createLightingClock();
   let lighting = { ...getLightingState(0), automatic: true };
-  const target = new THREE.Vector3(2.5 + START.x * 0.22, 0, 4 + START.z * 0.2);
+  const target = new THREE.Vector3(
+    HOME_FOCUS.x + START.x * 0.22,
+    HOME_FOCUS.y,
+    HOME_FOCUS.z + START.z * 0.2,
+  );
   const cameraOffset = new THREE.Vector3(24, 29, 32);
   const materials = new Map();
   function mat(color, extra = {}) {
@@ -720,6 +737,32 @@ export function createWorld(host, callbacks) {
   const arenaCelebration = createArenaCelebration(scene, {
     reducedMotion: reduced,
   });
+  const soccerWorld = createSoccerWorld(scene, { reducedMotion: reduced });
+  const teamRingGeometry = new THREE.RingGeometry(1.04, 1.27, 32);
+  teamRingGeometry.rotateX(-Math.PI / 2);
+  const teamRings = Object.fromEntries(
+    [
+      ["blue", "#77c1f0"],
+      ["orange", "#f3a366"],
+    ].map(([team, color]) => {
+      const rings = new THREE.InstancedMesh(
+        teamRingGeometry,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false,
+        }),
+        SOCCER.maxPlayers,
+      );
+      rings.name = `soccer-${team}-team-markers`;
+      rings.count = 0;
+      rings.frustumCulled = false;
+      scene.add(rings);
+      return [team, rings];
+    }),
+  );
+  const teamRingMatrix = new THREE.Matrix4();
   const nightLights = createNightLights(scene, car);
   applyCarCosmetics(car, equipped, localColor);
   let boostUntil = 0;
@@ -732,22 +775,109 @@ export function createWorld(host, callbacks) {
   let arenaView = false,
     previousZoom = null,
     arenaViewRadius = ARENA.minRadius;
+  let soccer = null,
+    soccerDisplay = null,
+    soccerPeek = false,
+    soccerView = false,
+    soccerTransfer = null;
   const remoteFalls = new Map();
   const arenaLive = (value) =>
     value && ["countdown", "running"].includes(value.status);
   const arenaMember = () =>
     arena?.players?.find((player) => player.id === localId);
   const insideArena = () => Boolean(arenaLive(arena) && arenaMember());
+  const soccerLive = (value) =>
+    value && ["countdown", "playing", "goal"].includes(value.status);
+  const soccerMember = () =>
+    soccer?.players?.some((player) => player.id === localId);
+  const insideSoccer = () =>
+    Boolean(
+      soccerMember() &&
+        soccerTransfer !== "leaving" &&
+        (soccerLive(soccer) || soccerTransfer === "entering"),
+    );
+  function refreshViews(radiusChanged = false) {
+    const nextArena = insideArena() || arenaPeek;
+    const nextSoccer = !nextArena && (insideSoccer() || soccerPeek);
+    const wasFocused = arenaView || soccerView;
+    const focused = nextArena || nextSoccer;
+    const changed =
+      nextArena !== arenaView || nextSoccer !== soccerView || radiusChanged;
+    if (focused !== wasFocused) {
+      if (focused) {
+        previousZoom = zoom;
+        zoom = 1;
+      } else {
+        zoom = previousZoom ?? zoom;
+        previousZoom = null;
+      }
+    }
+    arenaView = nextArena;
+    soccerView = nextSoccer;
+    if (changed) resize();
+  }
+  function refreshSoccer() {
+    soccerWorld.setMatch(soccerLive(soccer) ? soccer : soccerDisplay || soccer);
+    refreshViews();
+  }
+  function setSoccerSpectating(value) {
+    if (
+      value &&
+      (insideSoccer() ||
+        insideArena() ||
+        (race &&
+          localId &&
+          (race.hostId === localId || race.guestId === localId)))
+    )
+      return;
+    soccerPeek = Boolean(value);
+    if (soccerPeek) arenaPeek = false;
+    clearInput();
+    cancelNavigation();
+    speed = boostUntil = 0;
+    refreshSoccer();
+  }
+  function leaveSpectatorView() {
+    if ((!arenaPeek || insideArena()) && (!soccerPeek || insideSoccer()))
+      return false;
+    arenaPeek = soccerPeek = false;
+    refreshViews();
+    return true;
+  }
+  function updateSoccerTeams() {
+    const shown = soccerLive(soccer) ? soccer : soccerDisplay;
+    for (const rings of Object.values(teamRings)) rings.count = 0;
+    if (soccerLive(shown))
+      for (const player of shown.players || []) {
+        const rings = teamRings[player.team];
+        const model =
+          player.id === localId ? car : remoteCars.get(player.id)?.model;
+        if (!rings || !model?.visible || rings.count >= SOCCER.maxPlayers)
+          continue;
+        rings.setMatrixAt(
+          rings.count++,
+          teamRingMatrix.makeTranslation(
+            model.position.x,
+            model.position.y + 0.08,
+            model.position.z,
+          ),
+        );
+      }
+    for (const rings of Object.values(teamRings))
+      rings.instanceMatrix.needsUpdate = true;
+  }
   function setArenaSpectating(value) {
     if (
       value &&
       (insideArena() ||
+        insideSoccer() ||
         (race &&
           localId &&
           (race.hostId === localId || race.guestId === localId)))
     )
       return;
     arenaPeek = Boolean(value);
+    if (arenaPeek) soccerPeek = false;
     clearInput();
     cancelNavigation();
     speed = 0;
@@ -760,21 +890,10 @@ export function createWorld(host, callbacks) {
     arenaCelebration.setRadius(shown?.radius || ARENA.minRadius);
     if (shown?.status === "running")
       arenaCelebration.celebrate("start", shown.id);
-    const nextView = insideArena() || arenaPeek;
     const nextRadius = shown?.radius || ARENA.minRadius;
-    const resized = nextView !== arenaView || nextRadius !== arenaViewRadius;
-    if (nextView !== arenaView) {
-      if (nextView) {
-        previousZoom = zoom;
-        zoom = 1;
-      } else {
-        zoom = previousZoom ?? zoom;
-        previousZoom = null;
-      }
-      arenaView = nextView;
-    }
+    const resized = nextRadius !== arenaViewRadius;
     arenaViewRadius = nextRadius;
-    if (resized) resize();
+    refreshViews(resized);
   }
   let recovering = 0;
   let waypoints = [];
@@ -811,11 +930,7 @@ export function createWorld(host, callbacks) {
         (arenaMember()?.alive === false || arenaFellAt !== null))
     )
       return;
-    if (arenaPeek && !insideArena()) {
-      arenaPeek = false;
-      refreshArena();
-      return;
-    }
+    if (leaveSpectatorView()) return;
     renderer.domElement.focus({ preventScroll: true });
     const rect = renderer.domElement.getBoundingClientRect();
     pointer.set(
@@ -825,11 +940,14 @@ export function createWorld(host, callbacks) {
     raycaster.setFromCamera(pointer, camera);
     if (
       !raycaster.ray.intersectPlane(ground, hit) ||
-      (!(insideArena()
-        ? Math.hypot(hit.x - ARENA.cx, hit.z - ARENA.cz) < arena.radius - 0.8
-        : isDriveable(hit.x, hit.z)) &&
+      (!(insideSoccer()
+        ? isSoccerDriveable(hit.x, hit.z, -SOCCER.carRadius)
+        : insideArena()
+          ? Math.hypot(hit.x - ARENA.cx, hit.z - ARENA.cz) < arena.radius - 0.8
+          : isDriveable(hit.x, hit.z)) &&
         !(
           !insideArena() &&
+          !insideSoccer() &&
           Math.abs(hit.x) <= 22 &&
           hit.z >= 24 &&
           hit.z <= 43
@@ -839,6 +957,8 @@ export function createWorld(host, callbacks) {
     driveTo({ x: hit.x, z: hit.z });
   }
   function driveTo(destination) {
+    if (insideSoccer())
+      destination = clampSoccerPose(destination.x, destination.z);
     if (
       Math.hypot(
         destination.x - car.position.x,
@@ -848,13 +968,14 @@ export function createWorld(host, callbacks) {
       cancelNavigation();
       return;
     }
-    const path = insideArena()
-      ? [{ x: destination.x, z: destination.z }]
-      : findWorldPath(
-          { x: car.position.x, z: car.position.z },
-          destination,
-          colliders,
-        );
+    const path =
+      insideArena() || insideSoccer()
+        ? [{ x: destination.x, z: destination.z }]
+        : findWorldPath(
+            { x: car.position.x, z: car.position.z },
+            destination,
+            colliders,
+          );
     if (!path.length) {
       cancelNavigation();
       callbacks.onNavigationError?.();
@@ -887,7 +1008,8 @@ export function createWorld(host, callbacks) {
   const vec = new THREE.Vector3();
   let width = 1,
     height = 1;
-  let zoom = 2;
+  // Frame the west arena below the header with the island still near the center.
+  let zoom = 2.22;
   const worldLabels = interactionSurface.querySelector(".world-labels");
   const worldHeader = interactionSurface.querySelector(":scope > header");
   const worldFooter = interactionSurface.querySelector(":scope > footer");
@@ -919,7 +1041,9 @@ export function createWorld(host, callbacks) {
     const aspect = width / height;
     const size = arenaView
       ? Math.max(arenaViewRadius * 2.8, 38) * Math.max(1, 1.25 / aspect) * zoom
-      : (aspect < 1.2 ? 48 / aspect : 36) * zoom;
+      : soccerView
+        ? soccerViewSize(width, height, interactionSurface.clientWidth) * zoom
+        : (aspect < 1.2 ? 48 / aspect : 36) * zoom;
     worldLabels?.style.setProperty(
       "--place-label-scale",
       String(THREE.MathUtils.clamp(Math.sqrt(height / size / 22), 0.84, 1)),
@@ -941,7 +1065,7 @@ export function createWorld(host, callbacks) {
     e.preventDefault();
     zoom = THREE.MathUtils.clamp(
       zoom + e.deltaY * 0.0007,
-      arenaView ? 0.85 : 0.55,
+      arenaView || soccerView ? 0.85 : 0.55,
       3,
     );
     resize();
@@ -995,10 +1119,7 @@ export function createWorld(host, callbacks) {
     if (accepted.includes(e.code)) {
       e.preventDefault();
       keys.add(e.code);
-      if (arenaPeek && !insideArena()) {
-        arenaPeek = false;
-        refreshArena();
-      }
+      leaveSpectatorView();
     }
     if (e.repeat) return;
     if (e.code === "KeyR") reset();
@@ -1014,9 +1135,8 @@ export function createWorld(host, callbacks) {
   window.addEventListener("blur", stopInput);
   document.addEventListener("visibilitychange", stopInput);
   function reset() {
-    if (insideArena()) return;
-    arenaPeek = false;
-    refreshArena();
+    if (insideArena() || insideSoccer()) return;
+    leaveSpectatorView();
     clearImpact();
     cancelNavigation();
     if (callbacks.onReset?.() === true) return;
@@ -1089,14 +1209,17 @@ export function createWorld(host, callbacks) {
     duelWorld.setNight(lighting.night);
     arenaWorld.setNight(lighting.night);
     arenaCelebration.setNight(lighting.night);
+    soccerWorld.setNight(lighting.night);
     recovering = Math.max(0, recovering - dt);
     const raceParticipant =
       race && localId && (race.hostId === localId || race.guestId === localId);
     const inArena = insideArena();
+    const inSoccer = insideSoccer();
     const arenaEliminated =
       inArena && (arenaMember()?.alive === false || arenaFellAt !== null);
     const countdownLocked = Boolean(
       (inArena && arena.status === "countdown") ||
+        (inSoccer && soccer.status !== "playing") ||
         (raceParticipant &&
           race.status === "countdown" &&
           Date.now() < race.startsAt),
@@ -1107,6 +1230,7 @@ export function createWorld(host, callbacks) {
       !countdownLocked &&
       !arenaEliminated &&
       !(arenaPeek && !inArena) &&
+      !(soccerPeek && !inSoccer) &&
       recovering === 0;
     const vehicle = getVehicleProfile(equipped.body);
     const drivingVehicle =
@@ -1175,12 +1299,13 @@ export function createWorld(host, callbacks) {
           );
           heading += turn * (1 - Math.exp(-10 * vehicle.grip * dt));
           steer = THREE.MathUtils.clamp(turn * 1.3, -1, 1);
-          const desiredSpeed =
-            Math.min(
-              (3.5 * (boost ? drivingVehicle.boostSpeed : vehicle.topSpeed)) /
-                6.8,
-              (distance * 3.2 * vehicle.acceleration) / 9,
-            ) * Math.max(0.1, Math.cos(turn));
+          const desiredSpeed = inSoccer
+            ? soccerNavigationSpeed(distance, turn, drivingVehicle, boost)
+            : Math.min(
+                (3.5 * (boost ? drivingVehicle.boostSpeed : vehicle.topSpeed)) /
+                  6.8,
+                (distance * 3.2 * vehicle.acceleration) / 9,
+              ) * Math.max(0.1, Math.cos(turn));
           speed = THREE.MathUtils.lerp(
             speed,
             desiredSpeed,
@@ -1213,22 +1338,27 @@ export function createWorld(host, callbacks) {
       let vz = Math.cos(heading) * speed + impactMotion.z;
       const velocityScale = Math.min(
         1,
-        (inArena ? ARENA.maxSpeed - 2 : 22) / (Math.hypot(vx, vz) || 1),
+        (inArena
+          ? ARENA.maxSpeed - 2
+          : inSoccer
+            ? SOCCER.maxCarSpeed - 2
+            : 22) / (Math.hypot(vx, vz) || 1),
       );
       car.position.x += vx * velocityScale * dt;
       car.position.z += vz * velocityScale * dt;
-      for (const c of colliders) {
-        const dx = car.position.x - c.x,
-          dz = car.position.z - c.z,
-          d = Math.hypot(dx, dz);
-        if (d < c.r + 0.58 && d > 0.001) {
-          const push = (c.r + 0.58 - d) / d;
-          car.position.x += dx * push;
-          car.position.z += dz * push;
-          speed *= -0.22 * vehicle.bounce;
-          debugCollisions++;
+      if (!inSoccer && !inArena)
+        for (const c of colliders) {
+          const dx = car.position.x - c.x,
+            dz = car.position.z - c.z,
+            d = Math.hypot(dx, dz);
+          if (d < c.r + 0.58 && d > 0.001) {
+            const push = (c.r + 0.58 - d) / d;
+            car.position.x += dx * push;
+            car.position.z += dz * push;
+            speed *= -0.22 * vehicle.bounce;
+            debugCollisions++;
+          }
         }
-      }
       if (Math.abs(speed) > 0.3) {
         driveTime += dt;
         if (!hasMoved) {
@@ -1269,8 +1399,26 @@ export function createWorld(host, callbacks) {
           cancelNavigation();
         }
       }
+      if (inSoccer) {
+        const contact = resolveSoccerWall({
+          x: car.position.x,
+          z: car.position.z,
+          vx: vx * velocityScale,
+          vz: vz * velocityScale,
+          speed,
+          heading,
+          impactX: impactMotion.x,
+          impactZ: impactMotion.z,
+        });
+        car.position.x = contact.x;
+        car.position.z = contact.z;
+        impactMotion.x = contact.impactX;
+        impactMotion.z = contact.impactZ;
+        if (contact.hit) cancelNavigation();
+      }
       if (
         !inArena &&
+        !inSoccer &&
         !isDriveable(car.position.x, car.position.z) &&
         projectDuel(previousPosition.x, previousPosition.z).inside
       ) {
@@ -1295,7 +1443,11 @@ export function createWorld(host, callbacks) {
           ) * 0.35;
         speed *= 0.85;
       }
-      if (!inArena && !isDriveable(car.position.x, car.position.z)) {
+      if (
+        !inArena &&
+        !inSoccer &&
+        !isDriveable(car.position.x, car.position.z)
+      ) {
         // Return to the last valid point, at most one frame away. A brief
         // visual dip signals recovery without sending an invalid/teleport pose.
         car.position.x = previousPosition.x;
@@ -1315,7 +1467,9 @@ export function createWorld(host, callbacks) {
         callbacks.onRecovery?.();
       }
       const railBumper =
-        jump < 0.4 ? railway.hitBumper(car.position, speed, elapsed) : null;
+        !inSoccer && !inArena && jump < 0.4
+          ? railway.hitBumper(car.position, speed, elapsed)
+          : null;
       if (railBumper) {
         railway.playBumper(railBumper.id, elapsed);
         cancelNavigation();
@@ -1329,7 +1483,7 @@ export function createWorld(host, callbacks) {
         boostUntil = elapsed + 0.25;
       }
       const attraction =
-        jump < 0.45
+        !inSoccer && !inArena && jump < 0.45
           ? attractions.hit(
               { x: car.position.x, z: car.position.z },
               speed,
@@ -1363,11 +1517,14 @@ export function createWorld(host, callbacks) {
           boostUntil = elapsed + 0.7;
         }
       }
-      const duelObstacle = duelWorld.hit(
-        { x: car.position.x, y: jump, z: car.position.z },
-        speed,
-        elapsed,
-      );
+      const duelObstacle =
+        !inSoccer && !inArena
+          ? duelWorld.hit(
+              { x: car.position.x, y: jump, z: car.position.z },
+              speed,
+              elapsed,
+            )
+          : null;
       if (duelObstacle) {
         duelWorld.play(duelObstacle.id, elapsed);
         callbacks.onInteraction?.({
@@ -1435,7 +1592,7 @@ export function createWorld(host, callbacks) {
       }
       const onTrampoline =
         Math.hypot(car.position.x - 8.1, car.position.z - 4) < 1.1;
-      if (onTrampoline && jump === 0) jumpVelocity = 5;
+      if (!inSoccer && !inArena && onTrampoline && jump === 0) jumpVelocity = 5;
       if (Math.abs(speed) > 2 && elapsed % 0.1 < dt) {
         const p = dust[dustIndex++ % dust.length];
         p.life = 1;
@@ -1452,8 +1609,9 @@ export function createWorld(host, callbacks) {
       jump = Math.max(0, jump + jumpVelocity * dt);
       if (jump === 0) jumpVelocity = 0;
     }
-    impactMotion.x *= Math.exp(-(inArena ? 1.5 : 2.4) * vehicle.grip * dt);
-    impactMotion.z *= Math.exp(-(inArena ? 1.5 : 2.4) * vehicle.grip * dt);
+    const impactDrag = inArena ? 1.5 : inSoccer ? SOCCER_IMPACT_DRAG : 2.4;
+    impactMotion.x *= Math.exp(-impactDrag * vehicle.grip * dt);
+    impactMotion.z *= Math.exp(-impactDrag * vehicle.grip * dt);
     impactMotion.spin *= Math.exp(-3.2 * vehicle.grip * dt);
     impactMotion.roll *= Math.exp(-5 * dt);
     attractions.update(dt, elapsed);
@@ -1461,6 +1619,7 @@ export function createWorld(host, callbacks) {
     duelWorld.update(dt, elapsed);
     arenaWorld.update(dt, elapsed);
     arenaCelebration.update(dt, elapsed);
+    soccerWorld.update(dt, elapsed);
     destinationMarker.scale.setScalar(
       reduced ? 1 : 1 + Math.sin(elapsed * 4) * 0.12,
     );
@@ -1507,25 +1666,27 @@ export function createWorld(host, callbacks) {
       }
     });
     const aspect = width / height;
-    const tx = 2.5;
     const railFocus = THREE.MathUtils.smoothstep(car.position.z, 11, 27);
     const duelProjection = projectDuel(car.position.x, car.position.z);
     const onDuel = duelProjection.inside;
     target.lerp(
       arenaView
         ? new THREE.Vector3(ARENA.cx, 0, ARENA.cz)
-        : onDuel
-          ? new THREE.Vector3(
-              car.position.x + Math.sin(duelProjection.heading) * 4,
-              0,
-              car.position.z + Math.cos(duelProjection.heading) * 4,
-            )
-          : new THREE.Vector3(
-              tx * (1 - railFocus * 0.65) +
-                car.position.x * (0.22 + railFocus * 0.5),
-              0,
-              car.position.z * (0.2 + railFocus * 0.63) + 4 * (1 - railFocus),
-            ),
+        : soccerView
+          ? new THREE.Vector3(SOCCER.cx, 0, SOCCER.cz)
+          : onDuel
+            ? new THREE.Vector3(
+                car.position.x + Math.sin(duelProjection.heading) * 4,
+                0,
+                car.position.z + Math.cos(duelProjection.heading) * 4,
+              )
+            : new THREE.Vector3(
+                HOME_FOCUS.x * (1 - railFocus * 0.65) +
+                  car.position.x * (0.22 + railFocus * 0.5),
+                HOME_FOCUS.y * (1 - railFocus),
+                car.position.z * (0.2 + railFocus * 0.63) +
+                  HOME_FOCUS.z * (1 - railFocus),
+              ),
       1 - Math.exp(-2 * dt),
     );
     camera.position.copy(target).add(cameraOffset);
@@ -1575,6 +1736,7 @@ export function createWorld(host, callbacks) {
         ) / Math.max(dt, 0.001);
       if (!teleported) cosmeticEffects.trail(p.model, remoteSpeed, dt, elapsed);
     }
+    updateSoccerTeams();
     cosmeticEffects.update(dt, elapsed);
     nightLights.update(lighting.night, elapsed);
     postProcessing.render(dt);
@@ -1602,6 +1764,8 @@ export function createWorld(host, callbacks) {
       raceLocked: countdownLocked,
       arenaMarker: project(ARENA.cx, 2.8, ARENA.cz),
       arenaSpectating: arenaPeek && !inArena,
+      soccerMarker: project(SOCCER.cx, 3, SOCCER.cz),
+      soccerSpectating: soccerPeek && !inSoccer,
       lighting,
       labels: ZONES.map((zone) => ({
         ...zone,
@@ -1644,10 +1808,7 @@ export function createWorld(host, callbacks) {
       mobile = { ...mobile, ...value };
       if (Object.values(value).some(Boolean)) {
         cancelNavigation();
-        if (arenaPeek && !insideArena()) {
-          arenaPeek = false;
-          refreshArena();
-        }
+        leaveSpectatorView();
       }
     },
     setSound: soundOn,
@@ -1663,11 +1824,11 @@ export function createWorld(host, callbacks) {
       race = value || null;
       if (
         race &&
-        arenaPeek &&
+        (arenaPeek || soccerPeek) &&
         localId &&
         (race.hostId === localId || race.guestId === localId)
       )
-        setArenaSpectating(false);
+        leaveSpectatorView();
       duelWorld.setRace(race, localId);
       if (
         race?.status === "countdown" &&
@@ -1683,6 +1844,7 @@ export function createWorld(host, callbacks) {
       const launching =
         value?.status === "countdown" && arena?.status !== "countdown";
       arena = value || null;
+      if (insideArena()) soccerPeek = false;
       if (newMatch || launching || !arenaLive(arena)) {
         arenaFellAt = null;
         car.visible = true;
@@ -1713,6 +1875,36 @@ export function createWorld(host, callbacks) {
       arenaCelebration.celebrate(kind, eventKey);
     },
     setArenaSpectating,
+    setSoccer(value) {
+      const newMatch = value?.id !== soccer?.id;
+      const changed =
+        value?.id !== soccer?.id ||
+        value?.status !== soccer?.status ||
+        value?.sequence !== soccer?.sequence;
+      soccer = value || null;
+      if (newMatch || !soccerMember()) soccerTransfer = null;
+      else if (soccerLive(soccer) && soccerTransfer === "entering")
+        soccerTransfer = null;
+      if (insideSoccer()) {
+        arenaPeek = soccerPeek = false;
+        if (changed) {
+          arenaFellAt = null;
+          car.visible = true;
+          carVisual.position.y = 0;
+          recovering = 0;
+          speed = jump = jumpVelocity = boostUntil = raceBoostUntil = 0;
+          clearInput();
+          clearImpact();
+          cancelNavigation();
+        }
+      }
+      refreshSoccer();
+    },
+    setSoccerDisplay(value) {
+      soccerDisplay = value || null;
+      refreshSoccer();
+    },
+    setSoccerSpectating,
     rewardLap() {
       railway.reward(elapsed);
     },
@@ -1724,8 +1916,13 @@ export function createWorld(host, callbacks) {
         if (seenImpacts.size > 64)
           seenImpacts.delete(seenImpacts.values().next().value);
         const push = event.participants?.find((p) => p.id === localId);
+        const soccerImpact =
+          insideSoccer() &&
+          soccer.status === "playing" &&
+          event.soccerId === soccer.id;
         if (
           push &&
+          (insideSoccer() || event.soccerId ? soccerImpact : true) &&
           !(
             insideArena() &&
             (arenaFellAt !== null || arenaMember()?.alive === false)
@@ -1733,25 +1930,39 @@ export function createWorld(host, callbacks) {
           [push.vx, push.vz, push.spin].every(Number.isFinite)
         ) {
           cancelNavigation();
-          const maxPush = insideArena() ? 32 : 16;
-          impactMotion.x = THREE.MathUtils.clamp(
-            impactMotion.x + push.vx,
-            -maxPush,
-            maxPush,
-          );
-          impactMotion.z = THREE.MathUtils.clamp(
-            impactMotion.z + push.vz,
-            -maxPush,
-            maxPush,
-          );
-          // Let the smaller everyday kick reverse the approaching car instead
-          // of being swallowed by its still-forward throttle velocity.
-          const along =
-            Math.sin(heading) * push.vx + Math.cos(heading) * push.vz;
-          if (!insideArena() && speed * along < 0)
-            speed =
-              Math.sign(speed) *
-              Math.min(Math.abs(speed) * 0.18, Math.abs(along) * 0.35);
+          if (soccerImpact) {
+            const response = applySoccerCarImpulse(
+              {
+                speed,
+                heading,
+                impactX: impactMotion.x,
+                impactZ: impactMotion.z,
+              },
+              push,
+            );
+            speed = response.speed;
+            impactMotion.x = response.impactX;
+            impactMotion.z = response.impactZ;
+          } else {
+            const maxPush = insideArena() ? 32 : 16;
+            impactMotion.x = THREE.MathUtils.clamp(
+              impactMotion.x + push.vx,
+              -maxPush,
+              maxPush,
+            );
+            impactMotion.z = THREE.MathUtils.clamp(
+              impactMotion.z + push.vz,
+              -maxPush,
+              maxPush,
+            );
+            // Preserve the established everyday and colosseum responses.
+            const along =
+              Math.sin(heading) * push.vx + Math.cos(heading) * push.vz;
+            if (!insideArena() && speed * along < 0)
+              speed =
+                Math.sign(speed) *
+                Math.min(Math.abs(speed) * 0.18, Math.abs(along) * 0.35);
+          }
           impactMotion.spin = push.spin;
           impactMotion.roll = push.spin * 0.14;
           if (jump < 0.15)
@@ -1781,6 +1992,7 @@ export function createWorld(host, callbacks) {
     },
     setIdentity(player) {
       clearImpact();
+      soccerTransfer = null;
       arenaFellAt = null;
       car.visible = true;
       if (player) {
@@ -1808,12 +2020,23 @@ export function createWorld(host, callbacks) {
       }
       duelWorld.setRace(race, localId);
       refreshArena();
+      refreshSoccer();
     },
     setPosition(player) {
       clearImpact();
       arenaFellAt = null;
       car.visible = true;
       carVisual.position.y = 0;
+      if (soccerMember()) {
+        // Teleport and match-state packets can land in separate browser frames.
+        // Honor the authoritative pose immediately, before applying pitch bounds.
+        soccerTransfer = soccerPoseTransfer(
+          soccer,
+          localId,
+          player,
+          soccerTransfer,
+        );
+      }
       const changedCourse =
         projectDuel(car.position.x, car.position.z).inside !==
         projectDuel(player.x, player.z).inside;
@@ -1826,6 +2049,7 @@ export function createWorld(host, callbacks) {
       heading = player.heading;
       speed = 0;
       clearInput();
+      refreshViews();
       if (changedCourse) {
         target.set(
           player.x - 3,
@@ -1841,9 +2065,12 @@ export function createWorld(host, callbacks) {
         setArenaSpectating(true);
         return;
       }
-      if (insideArena()) return;
-      arenaPeek = false;
-      refreshArena();
+      if (id === "soccer") {
+        setSoccerSpectating(true);
+        return;
+      }
+      if (insideArena() || insideSoccer()) return;
+      leaveSpectatorView();
       clearImpact();
       cancelNavigation();
       const zone = ZONES.find((z) => z.id === id);
@@ -1877,6 +2104,7 @@ export function createWorld(host, callbacks) {
       cosmeticEffects.dispose();
       arenaWorld.dispose?.();
       arenaCelebration.dispose();
+      soccerWorld.dispose();
       nightLights.dispose();
       postProcessing.dispose();
       const textures = new Set(),

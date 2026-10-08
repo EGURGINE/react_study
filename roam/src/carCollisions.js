@@ -16,6 +16,11 @@ export const ARENA_CAR_CONTACT = Object.freeze({
   closingFactor: 0.9,
   maxImpulse: 14,
 });
+export const SOCCER_CAR_CONTACT = Object.freeze({
+  minImpulse: 5.5,
+  closingFactor: 1.15,
+  maxImpulse: 14,
+});
 
 // Swept contact avoids skipping a car between the room's 80 ms pose updates.
 // This is shared math; only the server is allowed to publish an impact.
@@ -69,9 +74,14 @@ export function carContact(
     bounded(profile.bounce, 0.68, 1.3) *
       bounded(otherProfile.bounce, 0.68, 1.3),
   );
-  // Arena strength is selected by the server's current match membership,
+  // Match strength is selected by the server's current match membership,
   // never by a client-supplied mass, cosmetic or impact message.
-  const response = options.mode === "arena" ? ARENA_CAR_CONTACT : CAR_CONTACT;
+  const response =
+    options.mode === "arena"
+      ? ARENA_CAR_CONTACT
+      : options.mode === "soccer"
+        ? SOCCER_CAR_CONTACT
+        : CAR_CONTACT;
   const closingFactor =
     response.closingFactor ??
     (response.bumperImpulse * response.bumperFraction) /

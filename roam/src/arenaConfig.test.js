@@ -20,7 +20,7 @@ test("every player count has safe separated inward-facing starts and nonoverlapp
   for (let count = 2; count <= 10; count++)
     for (let seed = 0; seed < 30; seed++) {
       const layout = createArenaLayout(count, rng(seed));
-      assert.equal(layout.radius, count + 8);
+      assert.equal(layout.radius, (count + 8) * 1.5);
       assert.ok(layout.obstacles.length >= 6);
       assert.equal(new Set(layout.obstacles.map((item) => item.kind)).size, 3);
       assert.equal(
@@ -33,7 +33,11 @@ test("every player count has safe separated inward-facing starts and nonoverlapp
       for (const spawn of starts) {
         const dx = ARENA.cx - spawn.x,
           dz = ARENA.cz - spawn.z;
-        assert.ok(Math.abs(Math.hypot(dx, dz) - (layout.radius - 3)) < 1e-9);
+        assert.ok(
+          Math.abs(
+            Math.hypot(dx, dz) - (layout.radius - ARENA.spawnClearance),
+          ) < 1e-9,
+        );
         assert.ok(
           (Math.sin(spawn.heading) * dx + Math.cos(spawn.heading) * dz) /
             Math.hypot(dx, dz) >
@@ -70,38 +74,60 @@ test("every player count has safe separated inward-facing starts and nonoverlapp
     createArenaLayout(6, rng(42)),
   );
   assert.ok(createArenaLayout(2, () => 0).obstacles.length >= 6);
-  assert.equal(arenaRadius(100), 18);
+  assert.equal(arenaRadius(100), 27);
+  assert.equal(arenaRadius(-1), 15);
+  assert.equal(arenaRadius(NaN), 15);
+  assert.equal(arenaRadius(5.9), 19.5);
 });
 
-test("swept guards stop fast exits, leave gaps open, and use height at contact", () => {
-  const guards = [{ id: "east", angle: 0, halfAngle: 0.24 }];
-  const contact = arenaGuardContact(pose(0, 0), pose(30, 0), 10, guards);
-  assert.ok(contact);
-  assert.ok(contact.x - ARENA.cx < 10 - ARENA.carRadius);
-  assert.ok(contact.nx < -0.999 && Math.abs(contact.nz) < 1e-9);
-  assert.equal(arenaGuardContact(pose(0, 0), pose(0, 30), 10, guards), null);
-  assert.equal(
-    arenaGuardContact(pose(0, 0, 3), pose(30, 0, 3), 10, guards),
-    null,
-  );
-  assert.ok(arenaGuardContact(pose(8, 0, 2.8), pose(12, 0, 0), 10, guards));
-  assert.equal(
-    arenaGuardContact(pose(8, 0, 0), pose(12, 0, 8), 10, guards),
-    null,
-  );
-  const overlapping = arenaGuardContact(pose(9.7, 0), pose(11, 0), 10, guards);
-  assert.ok(overlapping && overlapping.x - ARENA.cx < 9.28);
-  const angle = 0.29;
-  assert.ok(
-    arenaGuardContact(
-      pose(8 * Math.cos(angle), 8 * Math.sin(angle)),
-      pose(12 * Math.cos(angle), 12 * Math.sin(angle)),
-      10,
-      guards,
-    ),
-    "round arc endpoint catches a grazing car disk",
-  );
-});
+for (const radius of [ARENA.minRadius, ARENA.maxRadius])
+  test(`swept guards protect the ${radius}m arena while keeping gaps and jumps open`, () => {
+    const guards = [{ id: "east", angle: 0, halfAngle: 0.24 }];
+    const contact = arenaGuardContact(
+      pose(0, 0), pose(radius + 20, 0), radius, guards,
+    );
+    assert.ok(contact);
+    assert.ok(contact.x - ARENA.cx < radius - ARENA.carRadius);
+    assert.ok(contact.nx < -0.999 && Math.abs(contact.nz) < 1e-9);
+    assert.equal(
+      arenaGuardContact(pose(0, 0), pose(0, radius + 20), radius, guards),
+      null,
+    );
+    assert.equal(
+      arenaGuardContact(pose(0, 0, 3), pose(radius + 20, 0, 3), radius, guards),
+      null,
+    );
+    assert.ok(
+      arenaGuardContact(
+        pose(radius - 2, 0, 2.8), pose(radius + 2, 0, 0), radius, guards,
+      ),
+    );
+    assert.equal(
+      arenaGuardContact(
+        pose(radius - 2, 0, 0), pose(radius + 2, 0, 8), radius, guards,
+      ),
+      null,
+    );
+    const overlapping = arenaGuardContact(
+      pose(radius - 0.3, 0), pose(radius + 1, 0), radius, guards,
+    );
+    assert.ok(
+      overlapping &&
+        overlapping.x - ARENA.cx <
+          radius - ARENA.carRadius - ARENA.guardThickness / 2,
+    );
+    const angle =
+      guards[0].halfAngle + Math.asin(ARENA.carRadius / radius) * 0.6;
+    assert.ok(
+      arenaGuardContact(
+        pose((radius - 2) * Math.cos(angle), (radius - 2) * Math.sin(angle)),
+        pose((radius + 2) * Math.cos(angle), (radius + 2) * Math.sin(angle)),
+        radius,
+        guards,
+      ),
+      "round arc endpoint catches a grazing car disk",
+    );
+  });
 
 test("maximum arena architecture remains separate from the existing duel road", () => {
   for (let i = 0; i < 1024; i++) {

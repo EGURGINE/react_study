@@ -22,6 +22,8 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     [arenas, setArenas] = useState([]),
     [arenaResult, setArenaResult] = useState(null),
     [arenaHonors, setArenaHonors] = useState(null),
+    [soccer, setSoccer] = useState(null),
+    [soccerResult, setSoccerResult] = useState(null),
     [latestLap, setLatestLap] = useState(null),
     [lapProgress, setLapProgress] = useState({ active: false, progress: 0 }),
     [gameBusy, setGameBusy] = useState(false);
@@ -62,6 +64,8 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         setRaceResult(null);
         setArenas([]);
         setArenaResult(null);
+        setSoccer(null);
+        setSoccerResult(null);
         clearGames();
         const base = import.meta.env.VITE_MULTIPLAYER_URL?.trim();
         const url =
@@ -131,6 +135,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
             setProfile(data.profile || null);
             setRaces(data.races || []);
             setArenas(data.arenas || []);
+            setSoccer(data.soccer || null);
             if (data.arenaHonors) setArenaHonors(data.arenaHonors);
             if (typeof data.resumeToken === "string") {
               try {
@@ -193,6 +198,10 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
           if (data.type === "race:state") setRaces(data.races || []);
           if (data.type === "arena:state") setArenas(data.arenas || []);
           if (data.type === "arena:honors") setArenaHonors(data.honors);
+          if (data.type === "soccer:state") setSoccer(data.soccer || null);
+          if (data.type === "soccer:finish" && data.result) {
+            setSoccerResult({ ...data.result, receivedAt: Date.now() });
+          }
           if (data.type === "arena:finish") {
             if (data.result?.winnerId) onGameEvent?.(data);
             if (
@@ -301,6 +310,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
           setProfile(null);
           setRaces([]);
           setArenas([]);
+          setSoccer(null);
           setPhotos({});
           setLapProgress({ active: false, progress: 0 });
           travelPending.current = false;
@@ -353,6 +363,7 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     setPeers([]);
     setConnected(false);
     setArenas([]);
+    setSoccer(null);
   }, []);
   const teleport = useCallback((destination) => {
     if (socket.current?.readyState === WebSocket.OPEN && identity.current) {
@@ -552,6 +563,11 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
         arena.players?.some((participant) => participant.id === player.id),
       ) || null
     : null;
+  const currentSoccer =
+    player &&
+    soccer?.players?.some((participant) => participant.id === player.id)
+      ? soccer
+      : null;
   return {
     configured,
     player,
@@ -582,6 +598,9 @@ export function useMultiplayer(position, notify, onInteraction, onGameEvent) {
     currentArena,
     arenaResult,
     arenaHonors,
+    soccer,
+    currentSoccer,
+    soccerResult,
     latestLap,
     lapProgress,
     gameBusy,
